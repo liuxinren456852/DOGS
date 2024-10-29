@@ -1,6 +1,6 @@
-# <img src="./assets/imgs/dog_icon.png" style="width:50px;height:auto"> DoGaussian
+# <img src="./assets/imgs/dog_icon.png" style="width:50px;height:auto"> DOGS
 
-<b>DoGaussian</b>: Distributed-Oriented Gaussian Splatting for Large-Scale 3D Reconstruction Via Gaussian Consensus 
+<b>DOGS</b>: Distributed-Oriented Gaussian Splatting for Large-Scale 3D Reconstruction Via Gaussian Consensus 
 
 [[Project Page](https://aibluefisher.github.io/DoGaussian) | [arXiv](https://arxiv.org/abs/2405.13943)] (**NeurIPS 2024**)
 
@@ -24,7 +24,7 @@ Our method accelerates the training of 3DGS by 6+ times when evaluated on large-
 
 ### Visualize scene splitting
 
-Please check and compile [my modification of COLMAP](https://github.com/AIBluefisher/colmap). After installation, launch COLMAP's GUI. I extended the original model files of COLMAP with an additional `cluster.txt` file, where each line of the file follows the format: [image_id, cluster_id]. When COLMAP's GUI find this file, it will render each image with its color corresponds to its cluster ID. Below are some examples of scene splitting:
+Please check and compile [my modification of COLMAP](https://github.com/AIBluefisher/colmap). After installation, launch COLMAP's GUI. I extended the original model files of COLMAP with an additional `cluster.txt` file, where each line of the file follows the format: [image_id, cluster_id]. Once COLMAP's GUI finds this file, it will render each image with its color corresponding to its cluster ID. Below are some examples of scene splitting:
 
 ![sci-art_blocks_2x4_cameras](https://github.com/user-attachments/assets/218ff44e-0f9a-43ab-bb72-99421f5702a4)
 
@@ -36,7 +36,7 @@ Please check and compile [my modification of COLMAP](https://github.com/AIBluefi
 If you find this project useful for your research, please consider citing our paper:
 ```bibtex
 @inproceedings{yuchen2024dogaussian,
-    title={DoGaussian: Distributed-Oriented Gaussian Splatting for Large-Scale 3D Reconstruction Via Gaussian Consensus},
+    title={DOGS: Distributed-Oriented Gaussian Splatting for Large-Scale 3D Reconstruction Via Gaussian Consensus},
     author={Yu Chen, Gim Hee Lee},
     booktitle={arXiv},
     year={2024},
