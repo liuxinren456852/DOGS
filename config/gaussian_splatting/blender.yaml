@@ -1,0 +1,82 @@
+neural_field_type: gs
+expname: ${neural_field_type}_${task}_${dataset.name}_${dataset.scene}
+task: novel_view_synthesis
+seed: 42
+
+dataset:
+  name: nerf_synthetic
+  root_dir: /home/usr/datasets/${dataset.name}
+  scene: ["chair", "drums", "ficus", "hotdog", "lego", "materials", "mic", "ship"]
+  train_split: train
+  val_split: val
+  data_split_json: ""
+  factor: 1
+  val_interval: 0
+  apply_mask: false
+  multi_blocks: false
+  num_blocks: 1
+  scale: true
+  rotate: false
+  batch_over_images: false
+
+trainer:
+  max_iterations: 30000
+  ckpt_path: ""
+  no_load_opt: false
+  no_load_scheduler: false
+  enable_tensorboard: true
+  enable_visdom: false
+  visdom_server: localhost
+  visdom_port: 9000
+  n_tensorboard: 30
+  n_validation: 5000
+  n_checkpoint: 10000
+  distributed: false
+  local_rank: 0
+
+prune:
+  iterations: [16000, 24000]
+  v_pow: 0.1
+  prune_decay: 0.6
+  prune_percent: 0.5
+
+optimizer:
+  lr:
+    position_init: 0.00016
+    position_final: 0.0000016
+    position_delay_mult: 0.01
+    position_max_iterations: 30000
+    feature: 0.0025
+    opacity: 0.05
+    scaling: 0.005
+    quaternion: 0.001
+
+pose_optimizer:
+  name: Adam
+  args:
+    lr: 0.001
+pose_scheduler:
+  name: ExponentialLR
+  lr_end: 1.e-5
+  gamma:
+
+geometry:
+  percent_dense: 0.01
+  sample_more_high_resolution: false
+  kernel_size: 0.1
+  densify_start_iter: 500
+  densify_end_iter: 15000
+  densification_interval: 100
+  opacity_reset_interval: 3000
+  densify_grad_threshold: 0.0002
+texture:
+  max_sh_degree: 3
+  anti_aliasing: false # true
+
+pipeline:
+  convert_SHs_python: false
+  compute_cov3D_python: false
+  debug: false
+
+loss:
+  lambda_dssim: 0.2
