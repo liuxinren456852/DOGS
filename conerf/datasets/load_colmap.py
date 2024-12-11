@@ -219,6 +219,7 @@ def load_colmap(
     manager = SceneManager(colmap_dir, load_points=True)
     manager.load()
 
+    points3d, colors = manager.points3D, manager.point3D_colors
     colmap_image_data = manager.images
     colmap_camera_data = manager.cameras
     image_name_to_image_id = manager.name_to_image_id
@@ -271,7 +272,7 @@ def load_colmap(
         camtoworlds = np.einsum("nij, ki -> nkj", camtoworlds, T)
         camtoworlds[:, :3, 3:4] *= scale
 
-        points3d = scale * (T[:3, :3] @ manager.points3D.T + T[:3, 3][..., None]).T # [Np, 3]
+        points3d = scale * (T[:3, :3] @ points3d.T + T[:3, 3][..., None]).T # [Np, 3]
 
         if rotate:
             # Rotate the scene to align with ground plane.
@@ -284,7 +285,6 @@ def load_colmap(
             camtoworlds = camtoworlds.numpy()
 
     if not os.path.exists(ply_path):
-        points3d, colors = manager.points3D, manager.point3D_colors
         print("Converting point3d.bin to .ply " +
               "will happen only the first time you open the scene.")
         store_ply(ply_path, points3d, colors)
