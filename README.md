@@ -72,7 +72,7 @@ cd scripts/train
 #### Train 3DGS on multiple GPUs
 Here we provide scripts and an example to show how to run DOGS on three compute nodes with 9 GPUs in total (1 GPU on a master node and 4 GPUs each of two slave nodes).
 
-Before running the program, we may need to change the parameters in the provided scripts:
+Before running the program, we may need to modify the parameters in the provided scripts:
 (1) `scripts/train/train_admm_master.sh`:
 - set `NUM_TOTAL_NODES` to the correct total number of GPUs (In this example, we use 9 GPUs as described above)
 - set `ETHERNET_INTERFACE` to the ethernet interface of your computer(we can get the correct interface of your server by typing `ifconfig` in the terminal of a Linux machine)
