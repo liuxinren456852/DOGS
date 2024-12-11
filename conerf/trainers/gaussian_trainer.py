@@ -479,7 +479,6 @@ class GaussianSplatTrainer(ImplicitReconTrainer):
             image_size = camera.image.shape[:-1]
             camera = camera_origin.downsample(32).copy_to_device(self.device)
             mask = self.mask(camera.image.permute(2, 0, 1), camera.image_index, image_size)
-            # print(f"[Debug] {mask}")
             loss_rgb_l1 = F.l1_loss(colors * mask, pixels)
             lambda_dssim = self.config.loss.lambda_dssim
             loss = (1.0 - lambda_dssim) * loss_rgb_l1 + \

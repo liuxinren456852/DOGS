@@ -5,18 +5,16 @@ seed: 42
 
 dataset:
   name: mipnerf360
-  root_dir: /home/yuchen/datasets/${dataset.name}
-  scene: bicycle # ["bicycle", "bonsai", "counter", "garden", "kitchen", "room", "stump"]
+  root_dir: /home/user/datasets/${dataset.name}
+  scene: ["bicycle", "bonsai", "counter", "garden", "kitchen", "room", "stump"]
   train_split: train
   val_split: val
   data_split_json: ""
   factor: 4
   val_interval: 8
   apply_mask: false
-  multi_blocks: true # false
+  multi_blocks: false
   num_blocks: 1
-  mx: 2
-  my: 2
   scale: true
   rotate: false
   cache_to_host: true
