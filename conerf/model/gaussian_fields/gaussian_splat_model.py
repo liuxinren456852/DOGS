@@ -11,7 +11,7 @@ from plyfile import PlyData, PlyElement
 from simple_knn._C import distCUDA2
 
 from conerf.datasets.utils import BasicPointCloud
-from conerf.geometry.camera import Camera
+# from conerf.geometry.camera import Camera
 from conerf.model.gaussian_fields.utils import (
     quaternion_to_rotation_mat,
     rotation_mat_left_multiply_scale_mat,
@@ -122,13 +122,11 @@ class GaussianSplatModel:
         self,
         max_sh_degree: int = 3,
         percent_dense: float = 0.01,
-        anti_aliasing: bool = False,
         device: str = "cuda"
     ) -> None:
         self.device = device
         self.active_sh_degree = 0
         self.max_sh_degree = max_sh_degree
-        self.anti_aliasing = anti_aliasing
         self.percent_dense = percent_dense
 
         self._xyz = torch.empty(0)
@@ -137,6 +135,8 @@ class GaussianSplatModel:
         self._scaling = torch.empty(0)
         self._quaternion = torch.empty(0)
         self._opacity = torch.empty(0)
+
+        self._exposure = torch.empty(0)
 
         self.max_radii2D = torch.empty(0)
         self.xyz_gradient_accum = torch.empty(0)
@@ -202,16 +202,6 @@ class GaussianSplatModel:
         return self.scaling_activation(self._scaling)
 
     @property
-    def get_scaling_with_3D_filter(self):
-        assert self.anti_aliasing is True
-
-        scales = self.get_scaling
-
-        scales = torch.square(scales) + torch.square(self.filter3D)
-        scales = torch.sqrt(scales)
-        return scales
-
-    @property
     def get_xyz(self):
         return self._xyz
 
@@ -268,32 +258,19 @@ class GaussianSplatModel:
         """
         return self.opacity_activation(self._opacity)
 
-    @property
-    def get_opacity_with_3D_filter(self):
-        """
-        Return the opacity by applying a 3D filter.
-        """
-        assert self.anti_aliasing is True
-
-        opacity = self.opacity_activation(self._opacity)
-        # Apply 3D filter
-        scales = self.get_scaling
-
-        scales_square = torch.square(scales)
-        det1 = scales_square.prod(dim=1)
-
-        scales_after_square = scales_square + torch.square(self.filter3D)
-        det2 = scales_after_square.prod(dim=1)
-        coef = torch.sqrt(det1 / det2)
-
-        return opacity * coef[..., None]
-
     def get_covariance(self, scaling_modifier: float = 1.0):
         return self.covariance_activation(
             self.get_scaling,
             scaling_modifier,
             self._quaternion
         )
+
+    @property
+    def get_exposure(self):
+        return self._exposure
+    
+    def get_exposure_from_id(self, image_id: int):
+        return self._exposure[self.image_id_to_index[image_id]]
 
     def get_all_properties(self, indices: torch.Tensor = None) -> Tuple:
         if indices is None:
@@ -312,7 +289,7 @@ class GaussianSplatModel:
 
     def get_sub_gaussians(self, indices: torch.Tensor):
         sub_gaussians = GaussianSplatModel(
-            self.max_sh_degree, self.percent_dense, self.anti_aliasing
+            self.max_sh_degree, self.percent_dense,
         )
         sub_gaussians.active_sh_degree = self.active_sh_degree
         sub_gaussians.set_opt_xyz(self._xyz[indices, :])
@@ -378,61 +355,6 @@ class GaussianSplatModel:
         self._quaternion.requires_grad = True
         self._opacity.requires_grad = True
 
-    @torch.no_grad()
-    def compute_3D_filter(self, cameras: List[Camera]):
-        """
-        Compute the 3D filter which is applied to band-limit the 3D Gaussians.
-        """
-        assert self.anti_aliasing is True
-
-        # print("Computing 3D filter")
-        xyz = self.get_xyz
-        device = xyz.device
-        distance = torch.ones((xyz.shape[0]), device=device) * 100000.0
-        valid_points = torch.zeros(
-            (xyz.shape[0]), device=device, dtype=torch.bool)
-
-        # We should use the focal length of the highest resolution camera
-        focal_length = 0.
-        for camera in cameras:
-            # (1) Transform points to camera space.
-            R = camera.R.clone().detach().to(device)
-            t = camera.t.clone().detach().to(device)
-            # R is stored transposed due to 'glm' in CUDA code so we do not
-            # need to transpose here.
-            P_C = xyz @ R + t[None, :]
-
-            # (2) Project to screen space.
-            valid_depths = P_C[:, 2] > 0.2
-
-            x, y, z = P_C[:, 0], P_C[:, 1], P_C[:, 2]
-            z = torch.clamp(z, min=0.001)
-
-            x = x / z * camera.fx + camera.width / 2.0
-            y = y / z * camera.fy + camera.height / 2.0
-
-            # Use similar tangent space filtering as in the paper.
-            in_screen = torch.logical_and(
-                torch.logical_and(
-                    x >= -0.15 * camera.width,
-                    x <= camera.width * 1.15),
-                torch.logical_and(
-                    y >= -0.15 * camera.height,
-                    y <= 1.15 * camera.height)
-            )
-
-            valid = torch.logical_and(valid_depths, in_screen)
-
-            distance[valid] = torch.min(distance[valid], z[valid])
-            valid_points = torch.logical_or(valid_points, valid)
-            if focal_length < camera.fx:
-                focal_length = camera.fx
-
-        distance[~valid_points] = distance[valid_points].max()
-
-        filter_3D = distance / focal_length * (0.2 ** 0.5)
-        self.filter3D = filter_3D[..., None] # pylint: disable=W0201
-
     def increase_SH_degree(self):
         if self.active_sh_degree < self.max_sh_degree:
             self.active_sh_degree += 1
@@ -440,32 +362,6 @@ class GaussianSplatModel:
     def reset_opacity(self, optimizer):
         opacities_new = inverse_sigmoid(torch.min(
             self.get_opacity, torch.ones_like(self.get_opacity) * 0.01))
-        optimizable_tensors = replace_tensor_to_optimizer(
-            opacities_new, optimizer, "opacity")
-        self._opacity = optimizable_tensors["opacity"]
-
-    def reset_opacity_with_3D_filter(self, optimizer):
-        assert self.anti_aliasing is True
-
-        # Reset opacity by considering 3D filter.
-        current_opacity_with_filter = self.get_opacity_with_3D_filter
-        opacities_new = torch.min(
-            current_opacity_with_filter,
-            torch.ones_like(current_opacity_with_filter) * 0.01
-        )
-
-        # Apply 3D filter
-        scales = self.get_scaling
-
-        scales_square = torch.square(scales)
-        det1 = scales_square.prod(dim=1)
-
-        scales_after_square = scales_square + torch.square(self.filter3D)
-        det2 = scales_after_square.prod(dim=1)
-        coef = torch.sqrt(det1 / det2)
-        opacities_new = opacities_new / coef[..., None]
-        opacities_new = inverse_sigmoid(opacities_new)
-
         optimizable_tensors = replace_tensor_to_optimizer(
             opacities_new, optimizer, "opacity")
         self._opacity = optimizable_tensors["opacity"]
@@ -621,11 +517,8 @@ class GaussianSplatModel:
 
         torch.cuda.empty_cache()
 
-    def add_densification_stats(self, screen_space_points, update_filter, pixels = None):
-        if pixels is not None:
-            participated_pixels = pixels[update_filter]
-        else:
-            participated_pixels = 1
+    def add_densification_stats(self, screen_space_points, update_filter):
+        participated_pixels = 1
 
         self.xyz_gradient_accum[update_filter] += torch.norm(
             screen_space_points.grad[update_filter, :2],
@@ -634,7 +527,7 @@ class GaussianSplatModel:
         ) * participated_pixels
         self.denom[update_filter] += participated_pixels
 
-    def init_from_colmap_pcd(self, pcd: BasicPointCloud):
+    def init_from_colmap_pcd(self, pcd: BasicPointCloud, image_idxs: List = None):
         """
         Initialize from the point clouds generated by COLMAP.
         """
@@ -668,6 +561,12 @@ class GaussianSplatModel:
         self._scaling = nn.Parameter(scales.requires_grad_(True))
         self._quaternion = nn.Parameter(quats.requires_grad_(True))
         self._opacity = nn.Parameter(opacities.requires_grad_(True))
+
+        if image_idxs is not None:
+            self.image_id_to_index = {idx: ind for ind, idx in enumerate(image_idxs)}
+            exposure = torch.eye(3, 4, device=self.device)[None].repeat(
+                len(image_idxs), 1, 1)
+            self._exposure = nn.Parameter(exposure.requires_grad_(True))
 
         self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device=self.device)
         self.xyz_gradient_accum = torch.zeros(
@@ -721,10 +620,6 @@ class GaussianSplatModel:
 
         elements = np.empty(xyz.shape[0], dtype=dtype_full)
         attributes = np.concatenate((xyz, normals, rgbs,), axis=1)
-
-        if self.anti_aliasing:
-            filter3D = detach_tensor_to_numpy(self.filter3D)
-            attributes = np.concatenate((attributes, filter3D), axis=1)
 
         elements[:] = list(map(tuple, attributes))
         ply = PlyElement.describe(elements, 'vertex')
@@ -802,7 +697,7 @@ class GaussianSplatModel:
 
     def to(self, device: str = "cuda"):
         new_gaussians = GaussianSplatModel(
-            self.max_sh_degree, self.percent_dense, self.anti_aliasing
+            self.max_sh_degree, self.percent_dense
         )
         new_gaussians.set_xyz(self._xyz.to(device))
         new_gaussians.set_features_dc(self._features_dc.to(device))

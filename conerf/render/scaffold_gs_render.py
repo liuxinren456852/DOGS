@@ -20,12 +20,11 @@ def render(
     pipeline_config: OmegaConf,
     bkgd_color: torch.Tensor,
     visible_mask: torch.Tensor = None,
-    kernel_size: float = 0.3,  # pylint: disable=W0613
     scaling_modifier: float = 1.0,
     anti_aliasing: bool = False,
     override_color: torch.Tensor = None,
-    subpixel_offset: torch.Tensor = None,
-    depth_threshold: float = 0.0,
+    separate_sh: bool = False,
+    use_trained_exposure: bool = False,
     device="cuda:0",
 ):
     # Get neural gaussian attributes.
@@ -54,14 +53,13 @@ def render(
         tanfovy=tan_fov_y,
         bg=bkgd_color,
         scale_modifier=scaling_modifier,
-        depth_threshold=depth_threshold,
         viewmatrix=viewpoint_camera.world_to_camera,
         projmatrix=viewpoint_camera.projective_matrix,
         sh_degree=1,
         campos=viewpoint_camera.camera_center,
         prefiltered=False,
         debug=pipeline_config.debug,
-        f_count=False,
+        antialiasing=anti_aliasing,
     )
 
     rasterizer = GaussianRasterizer(raster_settings=raster_settings)
@@ -69,11 +67,8 @@ def render(
     means2D, means3D = screen_space_points, xyz
     scales, rotations = scaling, quaternion
 
-    if anti_aliasing:
-        opacity = gaussian_splat_model.get_opacity_with_3D_filter
-
     # Rasterize visible Gaussians to image to obtain their radii (on screen).
-    rendered_image, radii, depth, alpha, pixels = rasterizer(
+    rendered_image, radii, depth = rasterizer(
         means3D=means3D,
         means2D=means2D,
         shs=None,
@@ -84,8 +79,16 @@ def render(
         cov3D_precomp=None,
     )
 
+    # Apply exposure to rendered image (training only)
+    if use_trained_exposure:
+        exposure = gaussian_splat_model.get_exposure_from_id(viewpoint_camera.image_index)
+        rendered_image = torch.matmul(
+            rendered_image.permute(1, 2, 0), exposure[:3, :3]
+        ).permute(2, 0, 1) + exposure[:3, 3, None, None]
+
     # Those Gaussians that were frustum culled or had a radius of 0 were visible.
     # They will be excluded from value updates used in the splitting criteria.
+    rendered_image = rendered_image.clamp(0, 1)
     results = {
         "rendered_image": rendered_image,  # [RGB, height, width]
         "screen_space_points": screen_space_points,
@@ -96,11 +99,6 @@ def render(
         "scaling": scaling,
         "depth": depth,
     }
-
-    if depth_threshold > 0:
-        results["pixels"] = pixels
-    else:
-        results["pixels"] = None
 
     return results
 
@@ -137,14 +135,13 @@ def prefilter_voxel(
         tanfovy=tan_fov_y,
         bg=bkgd_color,
         scale_modifier=scaling_modifier,
-        depth_threshold=0.0,
         viewmatrix=viewpoint_camera.world_to_camera,
         projmatrix=viewpoint_camera.projective_matrix,
         sh_degree=1,
         campos=viewpoint_camera.camera_center,
         prefiltered=False,
         debug=pipeline_config.debug,
-        f_count=False,
+        antialiasing=False,
     )
 
     rasterizer = GaussianRasterizer(raster_settings=raster_settings)

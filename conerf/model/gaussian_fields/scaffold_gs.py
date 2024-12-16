@@ -1,6 +1,7 @@
 # pylint: disable=[E1101,E1102,W0201]
 
 from functools import reduce
+from typing import List
 
 import einops
 import torch
@@ -74,10 +75,9 @@ class ScaffoldGS(GaussianSplatModel):
         appearance_dim: int = 32,
         max_sh_degree: int = 3,
         percent_dense: float = 0.01,
-        anti_aliasing: bool = False,
         device: str = "cuda"
     ) -> None:
-        super().__init__(max_sh_degree, percent_dense, anti_aliasing, device)
+        super().__init__(max_sh_degree, percent_dense, device)
 
         self.feat_dim = feat_dim
         self.num_offsets = num_offsets
@@ -144,7 +144,7 @@ class ScaffoldGS(GaussianSplatModel):
         data = np.unique(np.round(data / voxel_size), axis=0) * voxel_size
         return data
 
-    def init_from_colmap_pcd(self, pcd: BasicPointCloud):
+    def init_from_colmap_pcd(self, pcd: BasicPointCloud, image_idxs: List = None):
         points = self.voxelize_sample(pcd.points, voxel_size=self.voxel_size)
         fused_point_cloud = torch.tensor(
             np.asarray(points)).float().to(self.device)
@@ -173,6 +173,12 @@ class ScaffoldGS(GaussianSplatModel):
         self._scaling = nn.Parameter(scales.requires_grad_(True))
         self._quaternion = nn.Parameter(quats.requires_grad_(False))
         self._opacity = nn.Parameter(opacities.requires_grad_(False))
+
+        if image_idxs is not None:
+            self.image_id_to_index = {idx: ind for ind, idx in enumerate(image_idxs)}
+            exposure = torch.eye(3, 4, device=self.device)[None].repeat(
+                len(image_idxs), 1, 1)
+            self._exposure = nn.Parameter(exposure.requires_grad_(True))
 
         num_anchors = self.get_anchor.shape[0]
         self.opacity_accum = torch.zeros((num_anchors, 1), device=self.device)
@@ -404,7 +410,6 @@ class ScaffoldGS(GaussianSplatModel):
         opacity,
         offset_selection_mask,
         anchor_visible_mask,
-        pixels=None,
     ):
         temp_opacity = opacity.clone().view(-1).detach()
         temp_opacity[temp_opacity < 0] = 0

@@ -16,13 +16,16 @@ from conerf.datasets.dataset_base import MiniDataset
 from conerf.datasets.utils import (
     fetch_ply, compute_nerf_plus_plus_norm, create_dataset, get_block_info_dir
 )
-from conerf.loss.ssim_torch import ssim
+# from conerf.loss.ssim_torch import ssim
 from conerf.model.gaussian_fields.gaussian_splat_model import GaussianSplatModel
 from conerf.model.gaussian_fields.masks import AppearanceEmbedding
 from conerf.render.gaussian_render import render
 from conerf.model.gaussian_fields.prune import calculate_v_imp_score, prune_list
 from conerf.trainers.implicit_recon_trainer import ImplicitReconTrainer
 from conerf.visualization.pose_visualizer import visualize_cameras
+
+from diff_gaussian_rasterization import SparseGaussianAdam
+from fused_ssim import fused_ssim
 
 
 # NOTE: We define a callable class instead of a closure since a closure cannot
@@ -152,7 +155,11 @@ class GaussianSplatTrainer(ImplicitReconTrainer):
             print(f'Initialize 3DGS using {colmap_ply_path}')
 
         point_cloud = fetch_ply(colmap_ply_path)
-        self.gaussians.init_from_colmap_pcd(point_cloud)
+        self.gaussians.init_from_colmap_pcd(
+            point_cloud,
+            image_idxs=self.train_camera_idxs \
+                if self.config.appearance.use_trained_exposure else None
+        )
 
         # Precompute 3D filter for anti-aliasing.
         if self.config.texture.anti_aliasing:
@@ -162,7 +169,6 @@ class GaussianSplatTrainer(ImplicitReconTrainer):
         self.model = GaussianSplatModel(
             max_sh_degree=self.config.texture.max_sh_degree,
             percent_dense=self.config.geometry.percent_dense,
-            anti_aliasing=self.config.texture.anti_aliasing,
             device=self.device,
         )
 
@@ -178,10 +184,10 @@ class GaussianSplatTrainer(ImplicitReconTrainer):
         self.use_white_bkgd = \
             True if self.config.dataset.apply_mask else False
         self.viewpoint_stack = None
-        self.depth_threshold = self.config.geometry.get("depth_threshold", 0.0)
 
         random.shuffle(self.train_dataset.cameras)
         self.train_cameras = self.train_dataset.cameras.copy()
+        self.train_camera_idxs = [camera.image_index for camera in self.train_cameras]
 
         spatial_lr_scale = self.config.geometry.get("spatial_lr_scale", -1)
         if spatial_lr_scale < 0:
@@ -232,13 +238,26 @@ class GaussianSplatTrainer(ImplicitReconTrainer):
         if 'mask' in self.config.geometry and self.config.geometry.mask:
             self.mask_optimizer = torch.optim.Adam(self.mask.parameters(), lr=lr_config.mask)
 
-        self.optimizer = torch.optim.Adam(lr_params, lr=0.0, eps=1e-15)
+        # self.optimizer = torch.optim.Adam(lr_params, lr=0.0, eps=1e-15)
+        self.optimizer = SparseGaussianAdam(lr_params, lr=0.0, eps=1e-15)
         self.xyz_scheduler = ExponentialLR(
             lr_init=lr_config.position_init * self.spatial_lr_scale,
             lr_final=lr_config.position_final * self.spatial_lr_scale,
             lr_delay_mult=lr_config.position_delay_mult,
             max_steps=lr_config.position_max_iterations
         )
+
+        self.exposure_optimizer = None
+        self.exposure_scheduler = None
+        if self.config.appearance.use_trained_exposure:
+            self.exposure_optimizer = torch.optim.Adam([self.gaussians.get_exposure])
+            self.exposure_scheduler = ExponentialLR(
+                lr_init=lr_config.exposure_lr_init,
+                lr_final=lr_config.exposure_lr_final,
+                lr_delay_steps=lr_config.exposure_lr_delay_steps,
+                lr_delay_mult=lr_config.exposure_lr_delay_mult,
+                max_steps=lr_config.exposure_max_iterations,
+            )
 
         self.setup_pose_optimizer()
 
@@ -269,6 +288,10 @@ class GaussianSplatTrainer(ImplicitReconTrainer):
 
     def update_learning_rate(self):
         """Learning rate scheduling per step."""
+        self._update_gaussian_params_lr()
+        self._update_exposure_params_lr()
+
+    def _update_gaussian_params_lr(self):
         if self.xyz_scheduler is None:
             return
 
@@ -277,6 +300,13 @@ class GaussianSplatTrainer(ImplicitReconTrainer):
                 lr = self.xyz_scheduler(self.iteration)
                 param_group['lr'] = lr
                 return lr
+
+    def _update_exposure_params_lr(self):
+        if self.exposure_scheduler is None:
+            return
+
+        for param_group in self.exposure_optimizer.param_groups:
+            param_group['lr'] = self.exposure_scheduler(self.iteration)
 
     def training_resolution(self) -> int:
         if not self.config.geometry.get('coarse-to-fine', False):
@@ -459,10 +489,9 @@ class GaussianSplatTrainer(ImplicitReconTrainer):
             viewpoint_camera=camera,
             pipeline_config=self.config.pipeline,
             bkgd_color=self.color_bkgd,
-            kernel_size=self.config.geometry.kernel_size,
             anti_aliasing=self.config.texture.anti_aliasing,
-            subpixel_offset=None,
-            depth_threshold=self.depth_threshold * self.spatial_lr_scale,
+            separate_sh=True,
+            use_trained_exposure=self.config.appearance.use_trained_exposure,
             device=self.device,
         )
         colors, screen_space_points, visibility_filter, radii = (
@@ -473,22 +502,20 @@ class GaussianSplatTrainer(ImplicitReconTrainer):
         )
 
         # Compute loss.
+        lambda_dssim = self.config.loss.lambda_dssim
+        pixels = camera.image.permute(2, 0, 1)  # [RGB, height, width]
+        # loss_ssim = ssim(pixels, colors)
+        loss_ssim = fused_ssim(colors.unsqueeze(0), pixels.unsqueeze(0))
         if self.config.geometry.get("mask", False):
-            pixels = camera.image.permute(2, 0, 1)
-            loss_ssim = ssim(pixels, colors)
             image_size = camera.image.shape[:-1]
             camera = camera_origin.downsample(32).copy_to_device(self.device)
             mask = self.mask(camera.image.permute(2, 0, 1), camera.image_index, image_size)
             loss_rgb_l1 = F.l1_loss(colors * mask, pixels)
-            lambda_dssim = self.config.loss.lambda_dssim
             loss = (1.0 - lambda_dssim) * loss_rgb_l1 + \
                 lambda_dssim * (1.0 - loss_ssim) + \
                 0.5 * torch.mean((mask - 1) ** 2.) # Regularization for mask
         else:
-            pixels = camera.image.permute(2, 0, 1)  # [RGB, height, width]
             loss_rgb_l1 = F.l1_loss(colors, pixels)
-            loss_ssim = ssim(pixels, colors)
-            lambda_dssim = self.config.loss.lambda_dssim
             loss = (1.0 - lambda_dssim) * loss_rgb_l1 + \
                 lambda_dssim * (1.0 - loss_ssim)
 
@@ -518,7 +545,7 @@ class GaussianSplatTrainer(ImplicitReconTrainer):
                     radii[visibility_filter]
                 )
                 self.gaussians.add_densification_stats(
-                    screen_space_points, visibility_filter, pixels=render_results["pixels"])
+                    screen_space_points, visibility_filter)
 
                 if self.iteration > self.config.geometry.densify_start_iter and \
                         self.iteration % self.config.geometry.densification_interval == 0:
@@ -537,16 +564,7 @@ class GaussianSplatTrainer(ImplicitReconTrainer):
 
                 if self.iteration % self.config.geometry.opacity_reset_interval == 0 or \
                 (self.use_white_bkgd and self.iteration == self.config.geometry.densify_start_iter):
-                    if self.config.texture.anti_aliasing:
-                        self.gaussians.reset_opacity_with_3D_filter(self.optimizer)
-                    else:
-                        self.gaussians.reset_opacity(self.optimizer)
-
-            if self.config.texture.anti_aliasing and \
-            (self.iteration % 100 == 0 and self.iteration > self.config.geometry.densify_end_iter):
-                if self.iteration < self.config.trainer.max_iterations - 100:
-                    # Do not update in the end of training.
-                    self.gaussians.compute_3D_filter(cameras=self.train_cameras)
+                    self.gaussians.reset_opacity(self.optimizer)
 
             if self.iteration in list(self.config.prune.iterations):
                 gaussian_list, imp_list = prune_list( # pylint: disable=W0612
@@ -561,8 +579,15 @@ class GaussianSplatTrainer(ImplicitReconTrainer):
                 )
 
         # Optimizer step.
-        self.optimizer.step()
+
+        # self.optimizer.step()
+        visible = radii > 0
+        self.optimizer.step(visible, radii.shape[0])
         self.optimizer.zero_grad(set_to_none=True)
+
+        if self.exposure_optimizer is not None:
+            self.exposure_optimizer.step()
+            self.exposure_optimizer.zero_grad(set_to_none=True)
 
         if self.mask_optimizer is not None:
             self.mask_optimizer.step()

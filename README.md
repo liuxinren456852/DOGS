@@ -21,19 +21,20 @@ cd DOGS/scripts
 
 Our method accelerates the training of 3DGS by 6+ times when evaluated on large-scale scenes while concurrently achieving state-of-the-art rendering quality.
 
-<img src="./assets/imgs/dogaussian_pcl.gif" style="width:480px;height:auto" />
+<!-- <img src="./assets/imgs/dogaussian_pcl.gif" style="width:480px;height:auto" /> -->
 <img src="./assets/imgs/dogaussian.gif" style="width:480px;height:auto" />
 
 ## 🚀 TODO & Roadmap
 
 - ✔️ Release evaluation code 🎉
 - 🔲 Release pre-trained models on `Mill19`, `UrbanScene3D`, and `MatrixCity`
-- 🔲 Release web-viewer
+- ✔️ Release web-viewer
 - ✔️ Release training code
     - ✔️ Gaussian Splatting trainer 🎉
         - ✔️ Decoupled Appearance Embedding of [VastGaussian](https://openaccess.thecvf.com/content/CVPR2024/papers/Lin_VastGaussian_Vast_3D_Gaussians_for_Large_Scene_Reconstruction_CVPR_2024_paper.pdf)
         - ✔️ Gaussian Pruning of [LightGaussian](https://github.com/VITA-Group/LightGaussian)
     - ✔️ [Scaffold-GS](https://city-super.github.io/scaffold-gs/) trainer 🎉
+    - ✔️ Support [Taming-3DGS](https://github.com/humansensinglab/taming-3dgs) 🎉
     - 🔲 ADMM Gaussian Splatting trainer
 - 🔲 Test on street-view scenes
 - 🔲 Support distributed training of `Scaffold-GS` and `Octree-GS`

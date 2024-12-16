@@ -88,7 +88,11 @@ def compute_ssim(gt_image, pred_image):
     Return:
         SSIM
     """
-    return ssim(gt_image, pred_image).item()
+    try:
+        from fused_ssim import fused_ssim  # pylint: disable=[E0401,E0415]
+        return fused_ssim(gt_image, pred_image, train=False).item()
+    except:  # pylint: disable=W0702
+        return ssim(gt_image, pred_image).item()
 
 
 def compute_lpips(lpips_loss, gt_image, pred_image):

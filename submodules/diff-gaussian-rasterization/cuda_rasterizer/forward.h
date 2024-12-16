@@ -8,8 +8,7 @@
  *
  * For inquiries contact  george.drettakis@inria.fr
  */
-//  modification by VITA, Kevin 
-//  Added count_gaussian
+
 #ifndef CUDA_RASTERIZER_FORWARD_H_INCLUDED
 #define CUDA_RASTERIZER_FORWARD_H_INCLUDED
 
@@ -18,6 +17,7 @@
 #include "device_launch_parameters.h"
 #define GLM_FORCE_CUDA
 #include <glm/glm.hpp>
+#include <functional>
 
 namespace FORWARD
 {
@@ -28,6 +28,7 @@ namespace FORWARD
 		const float scale_modifier,
 		const glm::vec4* rotations,
 		const float* opacities,
+		const float* dc,
 		const float* shs,
 		bool* clamped,
 		const float* cov3D_precomp,
@@ -46,7 +47,8 @@ namespace FORWARD
 		float4* conic_opacity,
 		const dim3 grid,
 		uint32_t* tiles_touched,
-		bool prefiltered);
+		bool prefiltered,
+		bool antialiasing);
 
 	void filter_preprocess(int P, int M,
 		const float* means3D,
@@ -69,36 +71,19 @@ namespace FORWARD
 		const dim3 grid, dim3 block,
 		const uint2* ranges,
 		const uint32_t* point_list,
-		int W, int H,
-		const float2* points_xy_image,
-		const float* features,
-		const float* depths,
-		const float4* conic_opacity,
-		// float* final_T,
-		float* out_alpha,
-		uint32_t* n_contrib,
-		const float* bg_color,
-		float* out_color,
-		float* out_depth,
-		float* pixels);
-
-	// 
-
-	void count_gaussian(
-		const dim3 grid, dim3 block,
-		const uint2* ranges,
-		const uint32_t* point_list,
+		const uint32_t* per_tile_bucket_offset, uint32_t* bucket_to_tile,
+		float* sampled_T, float* sampled_ar, float* sampled_ard,
 		int W, int H,
 		const float2* points_xy_image,
 		const float* features,
 		const float4* conic_opacity,
 		float* final_T,
 		uint32_t* n_contrib,
+		uint32_t* max_contrib,
 		const float* bg_color,
-		int* gaussians_count,
-		float* important_score,
-		float* out_color);
-
+		float* out_color,
+		float* depths,
+		float* depth);
 }
 
 

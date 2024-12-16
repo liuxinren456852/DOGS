@@ -47,25 +47,28 @@ prune:
 
 optimizer:
   lr:
+    # Gaussian centers related.
     position_init: 0.00016
     position_final: 0.0000016
     position_delay_mult: 0.01
-    position_max_iterations: 30000
+    position_max_iterations: ${trainer.max_iterations}
+    # Exposure related.
+    exposure_lr_init: 0.01
+    exposure_lr_final: 0.001
+    exposure_lr_delay_steps: 0
+    exposure_lr_delay_mult: 0
+    exposure_max_iterations: ${trainer.max_iterations}
+    # Other 3D GS properties.
     feature: 0.0025
-    opacity: 0.05
+    opacity: 0.025
     scaling: 0.005
     quaternion: 0.001
-    mask: 0.001
-  # lr_pose:
-  #   rot: 5e-5
-  #   trans: 5e-5
 
 geometry:
   percent_dense: 0.01
   depth_threshold: 0
   coarse-to-fine: false
   sample_more_high_resolution: false
-  kernel_size: 0.1
   densify_start_iter: 500
   densify_end_iter: 15000
   opt_pose_start_iter: 3000
@@ -76,7 +79,10 @@ geometry:
 
 texture:
   max_sh_degree: 3
-  anti_aliasing: false # true
+  anti_aliasing: false
+
+appearance:
+  use_trained_exposure: false
 
 pipeline:
   convert_SHs_python: false

@@ -20,12 +20,11 @@ def render(
     viewpoint_camera: Camera,
     pipeline_config: OmegaConf,
     bkgd_color: torch.Tensor,
-    kernel_size: float = 0.3, # pylint: disable=W0613
     scaling_modifier: float = 1.0,
     anti_aliasing: bool = False,
     override_color: torch.Tensor = None,
-    subpixel_offset: torch.Tensor = None,
-    depth_threshold: float = 0.0,
+    separate_sh: bool = False,
+    use_trained_exposure: bool = False,
     device="cuda:0",
 ):
     # Create zero tensor. We will use it to make pytorch return
@@ -52,24 +51,20 @@ def render(
         tanfovy=tan_fov_y,
         bg=bkgd_color,
         scale_modifier=scaling_modifier,
-        depth_threshold=depth_threshold,
         viewmatrix=viewpoint_camera.world_to_camera,
         projmatrix=viewpoint_camera.projective_matrix,
         sh_degree=gaussian_splat_model.active_sh_degree,
         campos=viewpoint_camera.camera_center,
         prefiltered=False,
         debug=pipeline_config.debug,
-        f_count=False,
+        antialiasing=anti_aliasing,
     )
 
     rasterizer = GaussianRasterizer(raster_settings=raster_settings)
+    
     means3D = gaussian_splat_model.get_xyz
     means2D = screen_space_points
-
-    if anti_aliasing:
-        opacity = gaussian_splat_model.get_opacity_with_3D_filter
-    else:
-        opacity = gaussian_splat_model.get_opacity
+    opacity = gaussian_splat_model.get_opacity
 
     # If the precomputed 3D covariance is not provided, we compute it from
     # scaling / rotation by the rasterizer.
@@ -80,10 +75,7 @@ def render(
         cov3D_precomp = gaussian_splat_model.get_covariance(scaling_modifier)
     else:
         rotations = gaussian_splat_model.get_quaternion
-        if anti_aliasing:
-            scales = gaussian_splat_model.get_scaling_with_3D_filter
-        else:
-            scales = gaussian_splat_model.get_scaling
+        scales = gaussian_splat_model.get_scaling
 
     # Pre-compute colors from SHs in Python if they are not provided.
     # If not, then SH -> RGB conversion will be done by rasterizer.
@@ -107,37 +99,57 @@ def render(
             )
             precomputed_colors = torch.clamp_min(sh2rgb + 0.5, 0.0)
         else:
-            spherical_harmonics = gaussian_splat_model.get_features
+            # spherical_harmonics = gaussian_splat_model.get_features
+            if separate_sh:
+                dc = gaussian_splat_model.get_features_dc
+                spherical_harmonics = gaussian_splat_model.get_features_rest
+            else:
+                spherical_harmonics = gaussian_splat_model.get_features
     else:
         precomputed_colors = override_color
 
     # Rasterize visible Gaussians to image to obtain their radii (on screen).
-    rendered_image, radii, depth, alpha, pixels = rasterizer(
-        means3D=means3D,
-        means2D=means2D,
-        shs=spherical_harmonics,
-        colors_precomp=precomputed_colors,
-        opacities=opacity,
-        scales=scales,
-        rotations=rotations,
-        cov3D_precomp=cov3D_precomp,
-    )
+    if separate_sh:
+        rendered_image, radii, depth = rasterizer(
+            means3D=means3D,
+            means2D=means2D,
+            dc=dc,
+            shs=spherical_harmonics,
+            colors_precomp=precomputed_colors,
+            opacities=opacity,
+            scales=scales,
+            rotations=rotations,
+            cov3D_precomp=cov3D_precomp,
+        )
+    else:
+        rendered_image, radii, depth = rasterizer(
+            means3D=means3D,
+            means2D=means2D,
+            shs=spherical_harmonics,
+            colors_precomp=precomputed_colors,
+            opacities=opacity,
+            scales=scales,
+            rotations=rotations,
+            cov3D_precomp=cov3D_precomp,
+        )
+
+    # Apply exposure to rendered image (training only)
+    if use_trained_exposure:
+        exposure = gaussian_splat_model.get_exposure_from_id(viewpoint_camera.image_index)
+        rendered_image = torch.matmul(
+            rendered_image.permute(1, 2, 0), exposure[:3, :3]
+        ).permute(2, 0, 1) + exposure[:3, 3, None, None]
 
     # Those Gaussians that were frustum culled or had a radius of 0 were visible.
     # They will be excluded from value updates used in the splitting criteria.
+    rendered_image = rendered_image.clamp(0, 1)
     results = {
         "rendered_image": rendered_image,  # [RGB, height, width]
         "screen_space_points": screen_space_points,
         "visibility_filter": radii > 0,
         "radii": radii,
         "depth": depth,
-        "alpha": alpha,
     }
-
-    if depth_threshold > 0:
-        results["pixels"] = pixels
-    else:
-        results["pixels"] = None
 
     return results
 
@@ -147,7 +159,6 @@ def count_render(
     viewpoint_camera: Camera,
     pipeline_config: OmegaConf,
     bkgd_color: torch.Tensor,
-    kernel_size: float = 0.3, # pylint: disable=W0613
     scaling_modifier: float = 1.0,
     anti_aliasing: bool = False,
     override_color=None,
@@ -185,8 +196,6 @@ def count_render(
         image_width=int(viewpoint_camera.width),
         tanfovx=tan_fov_x,
         tanfovy=tan_fov_y,
-        # kernel_size=kernel_size,
-        # subpixel_offset=subpixel_offset,
         bg=bkgd_color,
         scale_modifier=scaling_modifier,
         depth_threshold=0.0,
@@ -202,11 +211,7 @@ def count_render(
     rasterizer = GaussianRasterizer(raster_settings=raster_settings)
     means3D = gaussian_splat_model.get_xyz
     means2D = screen_space_points
-
-    if anti_aliasing:
-        opacity = gaussian_splat_model.get_opacity_with_3D_filter
-    else:
-        opacity = gaussian_splat_model.get_opacity
+    opacity = gaussian_splat_model.get_opacity
 
     # If the precomputed 3D covariance is not provided, we compute it from
     # scaling / rotation by the rasterizer.
@@ -217,10 +222,7 @@ def count_render(
         cov3D_precomp = gaussian_splat_model.get_covariance(scaling_modifier)
     else:
         rotations = gaussian_splat_model.get_quaternion
-        if anti_aliasing:
-            scales = gaussian_splat_model.get_scaling_with_3D_filter
-        else:
-            scales = gaussian_splat_model.get_scaling
+        scales = gaussian_splat_model.get_scaling
 
     # Pre-compute colors from SHs in Python if they are not provided.
     # If not, then SH -> RGB conversion will be done by rasterizer.

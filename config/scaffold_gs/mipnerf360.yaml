@@ -6,7 +6,7 @@ seed: 42
 dataset:
   name: mipnerf360
   root_dir: /home/user/datasets/${dataset.name}
-  scene: ["bicycle", "bonsai", "counter", "garden", "kitchen", "room", "stump"]
+  scene: ["bicycle", "bonsai", "counter", "garden", "kitchen", "room", "stump", "flowers", "treehill"]
   train_split: train
   val_split: val
   data_split_json: ""
@@ -16,7 +16,7 @@ dataset:
   multi_blocks: false
   num_blocks: 1
   scale: true
-  rotate: false
+  rotate: true
   cache_to_host: true
   batch_over_images: false
 
@@ -39,11 +39,19 @@ trainer:
 
 optimizer:
   lr:
+    # Gaussian centers related.
     position_init: 0.0
     position_final: 0.0
     position_delay_mult: 0.01
     position_max_iterations: 30000
-    opacity: 0.02
+    # Exposure related.
+    exposure_lr_init: 0.01
+    exposure_lr_final: 0.001
+    exposure_lr_delay_steps: 0
+    exposure_lr_delay_mult: 0
+    exposure_max_iterations: ${trainer.max_iterations}
+    # Other 3D GS properties.
+    opacity: 0.01 # 0.02
     scaling: 0.007
     quaternion: 0.002
     # For Scaffold-GS
@@ -91,10 +99,8 @@ geometry:
   use_feat_bank: false
   # Common params as in original 3DGS.
   percent_dense: 0.01
-  depth_threshold: 0.37
   coarse-to-fine: false
   sample_more_high_resolution: false
-  kernel_size: 0.1
   stat_start_iter: 500
   densify_start_iter: 1500
   densify_end_iter: 15000
@@ -107,6 +113,9 @@ texture:
   appearance_dim: 0 # 32
   max_sh_degree: 3
   anti_aliasing: false
+
+appearance:
+  use_trained_exposure: false
 
 pipeline:
   convert_SHs_python: false

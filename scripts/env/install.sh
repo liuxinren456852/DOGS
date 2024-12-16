@@ -25,6 +25,7 @@ conda remove ffmpeg --force
 # Third-parties.
 
 pip install submodules/simple-knn
+pip install submodules/fused_ssim
 pip install submodules/diff-gaussian-rasterization
 
 mkdir 3rd_party && cd 3rd_party

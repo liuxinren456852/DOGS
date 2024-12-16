@@ -8,10 +8,12 @@ import torch.nn.functional as F
 import numpy as np
 
 from conerf.base.model_base import ModelBase
-from conerf.loss.ssim_torch import ssim
+# from conerf.loss.ssim_torch import ssim
 from conerf.model.gaussian_fields.scaffold_gs import ScaffoldGS
 from conerf.render.scaffold_gs_render import render, prefilter_voxel
 from conerf.trainers.gaussian_trainer import GaussianSplatTrainer, ExponentialLR
+
+from fused_ssim import fused_ssim
 
 
 class ScaffoldGSTrainer(GaussianSplatTrainer):
@@ -45,7 +47,6 @@ class ScaffoldGSTrainer(GaussianSplatTrainer):
             appearance_dim=self.config.texture.appearance_dim,
             max_sh_degree=self.config.texture.max_sh_degree,
             percent_dense=self.config.geometry.percent_dense,
-            anti_aliasing=self.config.texture.anti_aliasing,
             device=self.device,
         )
 
@@ -158,6 +159,18 @@ class ScaffoldGSTrainer(GaussianSplatTrainer):
                 max_steps=lr_config.mlp_feat_bank_max_iterations,
             )
 
+        self.exposure_optimizer = None
+        self.exposure_scheduler = None
+        if self.config.appearance.use_trained_exposure:
+            self.exposure_optimizer = torch.optim.Adam([self.gaussians.get_exposure])
+            self.exposure_scheduler = ExponentialLR(
+                lr_init=lr_config.exposure_lr_init,
+                lr_final=lr_config.exposure_lr_final,
+                lr_delay_steps=lr_config.exposure_lr_delay_steps,
+                lr_delay_mult=lr_config.exposure_lr_delay_mult,
+                max_steps=lr_config.exposure_max_iterations,
+            )
+
         self.setup_pose_optimizer()
 
     def update_learning_rate(self):
@@ -187,6 +200,8 @@ class ScaffoldGSTrainer(GaussianSplatTrainer):
                 lr_feat_bank = self.mlp_feature_bank_scheduler(self.iteration)
                 param_group['lr'] = lr_feat_bank
 
+        self._update_exposure_params_lr()
+
         return lr_anchor, lr_offset, lr_opacity, lr_color, lr_cov, lr_app_embedding, lr_feat_bank
 
     def train_iteration(self, data_batch) -> None:
@@ -213,7 +228,9 @@ class ScaffoldGSTrainer(GaussianSplatTrainer):
             viewpoint_camera=camera,
             pipeline_config=self.config.pipeline,
             bkgd_color=self.color_bkgd,
+            anti_aliasing=self.config.texture.anti_aliasing,
             visible_mask=visible_mask,
+            use_trained_exposure=self.config.appearance.use_trained_exposure,
             device=self.device,
         )
         colors, screen_space_points, visibility_filter = (
@@ -226,7 +243,8 @@ class ScaffoldGSTrainer(GaussianSplatTrainer):
         pixels = camera.image.permute(2, 0, 1)  # [RGB, height, width]
 
         loss_rgb_l1 = F.l1_loss(colors, pixels)
-        loss_ssim = ssim(pixels, colors)
+        # loss_ssim = ssim(pixels, colors)
+        loss_ssim = fused_ssim(colors.unsqueeze(0), pixels.unsqueeze(0))
         loss_scaling = render_results["scaling"].prod(dim=1).mean()
         lambda_dssim = self.config.loss.lambda_dssim
         loss = (1.0 - lambda_dssim) * loss_rgb_l1 + \
@@ -270,3 +288,7 @@ class ScaffoldGSTrainer(GaussianSplatTrainer):
 
         self.optimizer.step()
         self.optimizer.zero_grad(set_to_none=True)
+
+        if self.exposure_optimizer is not None:
+            self.exposure_optimizer.step()
+            self.exposure_optimizer.zero_grad(set_to_none=True)

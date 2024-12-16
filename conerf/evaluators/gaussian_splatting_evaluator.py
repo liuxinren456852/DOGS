@@ -16,7 +16,6 @@ from conerf.evaluators.evaluator import (
     Evaluator, compute_psnr, compute_lpips, compute_ssim, color_correct
 )
 from conerf.model.gaussian_fields.gaussian_splat_model import GaussianSplatModel
-# from conerf.render.gaussian_render import render
 from conerf.utils.utils import save_images, get_subdirs, colorize
 
 
@@ -31,7 +30,7 @@ class GaussianSplatEvaluator(Evaluator):
         load_val_data: bool = True,
         valset=None,
         load_test_data: bool = False,
-        testset = None,
+        testset=None,
         models: List = None,
         meta_data: List = None,
         verbose: bool = False,
@@ -51,16 +50,16 @@ class GaussianSplatEvaluator(Evaluator):
             device,
         )
 
-        self.color_bkgd = torch.tensor([0, 0, 0], dtype=torch.float32, device=self.device)
+        self.color_bkgd = torch.tensor(
+            [0, 0, 0], dtype=torch.float32, device=self.device)
 
     def _prepare_model_init_params(self, model_type: Literal["global", "local"] = "local"):
         pass
 
-    def _build_networks(self, *args, **kwargs): # pylint: disable=[W0613]
+    def _build_networks(self, *args, **kwargs):  # pylint: disable=[W0613]
         model = GaussianSplatModel(
             max_sh_degree=self.config.texture.max_sh_degree,
             percent_dense=self.config.geometry.percent_dense,
-            anti_aliasing=self.config.texture.anti_aliasing,
         )
         return model
 
@@ -86,7 +85,7 @@ class GaussianSplatEvaluator(Evaluator):
         return meta_data
 
     def load_model(self):
-        self.meta_data, self.models = [], [] # pylint: disable=W0201
+        self.meta_data, self.models = [], []  # pylint: disable=W0201
         ckpt_manager = CheckPointManager(verbose=False)
 
         input_model_dir = os.path.join(
@@ -181,12 +180,13 @@ class GaussianSplatEvaluator(Evaluator):
                 os.makedirs(splat_dir, exist_ok=True)
                 splat_path = os.path.join(splat_dir, f"iter_{iteration}.splat")
                 model.save_splat(splat_path)
-                
+
                 ply_dir = os.path.join(val_dir, "ply")
                 os.makedirs(ply_dir)
                 ply_path = os.path.join(ply_dir, f"iter_{iteration}.ply")
                 model.save_ply(ply_path)
-                colmap_ply_path = os.path.join(ply_dir, f"iter_{iteration}_points3D.txt")
+                colmap_ply_path = os.path.join(
+                    ply_dir, f"iter_{iteration}_points3D.txt")
                 model.save_colmap_ply(colmap_ply_path)
 
             image_dir = os.path.join(val_dir, "images")
@@ -240,13 +240,13 @@ class GaussianSplatEvaluator(Evaluator):
         return metrics
 
     @torch.no_grad()
-    def _eval(self, data, model, meta_data, eval_dir, image_index): # pylint: disable=W0613
-        pixels = data.image # [height, width, RGB]
+    def _eval(self, data, model, meta_data, eval_dir, image_index):  # pylint: disable=W0613
+        pixels = data.image  # [height, width, RGB]
 
         if self.config.neural_field_type == "gs":
-            from conerf.render.gaussian_render import render # pylint: disable=C0415
+            from conerf.render.gaussian_render import render  # pylint: disable=C0415
         elif self.config.neural_field_type == "scaffold_gs":
-            from conerf.render.scaffold_gs_render import render # pylint: disable=C0415
+            from conerf.render.scaffold_gs_render import render  # pylint: disable=C0415
         else:
             raise NotImplementedError
 
@@ -259,14 +259,14 @@ class GaussianSplatEvaluator(Evaluator):
             viewpoint_camera=data,
             pipeline_config=self.config.pipeline,
             bkgd_color=self.color_bkgd,
-            kernel_size=self.config.geometry.kernel_size,
-            subpixel_offset=None,
+            anti_aliasing=self.config.texture.anti_aliasing,
+            separate_sh=True,
         )
 
         render_time = time.time() - time_start
         render_max_mem = torch.cuda.max_memory_allocated() / (1024.0 ** 2)
 
-        colors, screen_space_points, visibility_filter, radii = ( # pylint: disable=W0612
+        colors, screen_space_points, visibility_filter, radii = (  # pylint: disable=W0612
             render_results["rendered_image"],
             render_results["screen_space_points"],
             render_results["visibility_filter"],
@@ -278,7 +278,8 @@ class GaussianSplatEvaluator(Evaluator):
         colors = torch.clamp(colors, 0, 1)
         depth = colorize(depth.cpu().squeeze(0), cmap_name="jet")
 
-        colors_cc = color_correct(colors.permute(1, 2, 0).numpy(), pixels.numpy())
+        colors_cc = color_correct(colors.permute(
+            1, 2, 0).numpy(), pixels.numpy())
         colors_cc = torch.from_numpy(colors_cc).permute(2, 0, 1)
 
         image_dict = {}
@@ -286,10 +287,12 @@ class GaussianSplatEvaluator(Evaluator):
         image_dict["rgb_test"] = colors_cc.permute(1, 2, 0)
         image_dict["depth"] = depth
 
-        save_images(save_dir=eval_dir, image_dict=image_dict, index=image_index)
+        save_images(save_dir=eval_dir,
+                    image_dict=image_dict, index=image_index)
 
         pixels = pixels[None, ...].to(self.device).permute(0, 3, 1, 2)
-        colors_cc = colors_cc[None, ...].to(self.device) # .permute(0, 3, 1, 2)
+        colors_cc = colors_cc[None, ...].to(
+            self.device)  # .permute(0, 3, 1, 2)
         psnr = compute_psnr(pixels, colors_cc).item()
         ssim = compute_ssim(pixels, colors_cc)
         lpips = compute_lpips(self.lpips_loss, pixels, colors_cc)
