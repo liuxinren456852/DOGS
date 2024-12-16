@@ -40,6 +40,24 @@ Our method accelerates the training of 3DGS by 6+ times when evaluated on large-
 
 ## 📋 Train & Test
 
+### ⚗️ Preprocess Mill-19 dataset and UrbanScene3D dataset
+Follow the instruction of [Mill 19](https://github.com/cmusatyalab/mega-nerf?tab=readme-ov-file#mill-19) and [UrbanScene 3D](https://github.com/cmusatyalab/mega-nerf?tab=readme-ov-file#urbanscene-3d) in Mega-NeRF to download the Mill-19 dataset and the UrbanScene3D dataset. We provide scripts to convert the Mega-NeRF camera poses to the format of COLMAP.
+
+```bash
+cd DOGS
+# Replace the `data_dir` at Line 202 and Line 205 by your own.
+python -m scripts.preprocess.meganerf_to_colmap
+```
+
+### ⚗️ Preprocess MatrixCity dataset
+We also provide a script to convert the camera poses of the MatrixCity dataset into the COLMAP format:
+```bash
+cd DOGS
+# Replace the 'data_dir_list' in Line 31 by your own; 
+# also set the scenes you want to convert at Line 23-27.
+python -m scripts.preprocess.matrix_city_to_colmap
+```
+
 ### ⚗️ Preprocess Large-Scale dataset
 
 We first run the provided script to pre-process a large-scale scene into several blocks:
@@ -47,7 +65,6 @@ We first run the provided script to pre-process a large-scale scene into several
 cd scripts/preprocess
 ./preprocess_large_scale_data.sh 0 urban3d gaussian_splatting
 ```
-
 
 <details>
 <summary><b>Visualize scene splitting</b></summary>
@@ -60,6 +77,24 @@ Please check and compile [my modification of COLMAP](https://github.com/AIBluefi
 
 
 </details>
+
+### ⚗️ Preprocess your own dataset
+
+Additionally, we provide scripts to preprocess your own dataset which inputs a `.MOV` video and outputs 
+the camera poses in COLMAP format:
+```bash
+VIDEO_DIR=x
+INPUT_FILE=xx
+OUTPUT_FOLDER=xxx
+FRAMERATE=3
+VOC_TREE_PATH=xxxx
+cd scripts/preprocess
+# (1) Convert video to image sequence
+./video_to_sequence.sh $VIDEO_DIR $INPUT_FILE $OUTPUT_FOLDER $FRAMERATE
+# (2) Compute camera poses with COLMAP
+./colmap_mapping.sh $VIDEO_DIR $VIDEO_DIR $VOC_TREE_PATH 100 0
+```
+
 
 ### ⌛ Train 3D Gaussian Splatting
 

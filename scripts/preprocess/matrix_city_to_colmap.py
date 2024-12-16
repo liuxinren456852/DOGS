@@ -1,4 +1,4 @@
-# pylint: disable=[E0402]
+# pylint: disable=[E1101,E0402]
 
 import os
 import json
@@ -28,11 +28,9 @@ SCENES = [
 ]
 COLMAP_PATH = '/usr/local/bin/colmap'
 data_dir_list = [
-    "/nfs/cv/mllm4photography/yuchen/Datasets/MatrixCity",
     "/home/chenyu/HD_Datasets/datasets/MatrixCity",
-    "/home/zwyan/3d_cv/data/MatrixCity"
 ]
-DATA_DIR = "/nfs/cv/mllm4photography/yuchen/Datasets/MatrixCity"  # None
+DATA_DIR = None
 for path in data_dir_list:
     if os.path.isdir(path):
         DATA_DIR = path
