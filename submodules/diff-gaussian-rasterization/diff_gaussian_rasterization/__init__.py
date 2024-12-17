@@ -1,4 +1,5 @@
-#
+# pylint: disable=E1101
+
 # Copyright (C) 2023, Inria
 # GRAPHDECO research group, https://team.inria.fr/graphdeco
 # All rights reserved.
@@ -156,7 +157,7 @@ class _RasterizeGaussians(torch.autograd.Function):
             # Copy them before they can be corrupted
             cpu_args = cpu_deep_copy_tuple(args)
             try:
-                grad_means2D, grad_colors_precomp, grad_opacities, grad_means3D, grad_cov3Ds_precomp, grad_dc, grad_sh, grad_scales, grad_rotations = _C.rasterize_gaussians_backward(
+                grad_means2D, grad_colors_precomp, grad_opacities, grad_means3D, grad_cov3Ds_precomp, grad_dc, grad_sh, grad_scales, grad_rotations, depth = _C.rasterize_gaussians_backward(
                     *args)
             except Exception as ex:
                 torch.save(cpu_args, "snapshot_bw.dump")
@@ -164,8 +165,24 @@ class _RasterizeGaussians(torch.autograd.Function):
                     "\nAn error occured in backward. Writing snapshot_bw.dump for debugging.\n")
                 raise ex
         else:
-            grad_means2D, grad_colors_precomp, grad_opacities, grad_means3D, grad_cov3Ds_precomp, grad_dc, grad_sh, grad_scales, grad_rotations = _C.rasterize_gaussians_backward(
+            grad_means2D, grad_colors_precomp, grad_opacities, grad_means3D, grad_cov3Ds_precomp, grad_dc, grad_sh, grad_scales, grad_rotations, depth = _C.rasterize_gaussians_backward(
                 *args)
+
+        if raster_settings.depth_threshold > 0:
+            # Calculate the scaling factor.
+            # depths = 1.0 / (invdepths + 1e-5)
+            scaling_factor = torch.minimum(
+                torch.ones_like(depth), (depth / raster_settings.depth_threshold) ** 2
+            )
+
+            def scale_tensor(tensor, scaling_factor):
+                num_dims = len(tensor.shape)
+                for _ in range(num_dims - 2):
+                    scaling_factor = scaling_factor.unsqueeze(-1)
+                scaling_factor_expanded = scaling_factor.expand_as(tensor)
+                return tensor * scaling_factor_expanded
+
+            grad_means2D = scale_tensor(grad_means2D, scaling_factor)
 
         grads = (
             grad_means3D,
@@ -197,6 +214,7 @@ class GaussianRasterizationSettings(NamedTuple):
     prefiltered: bool
     debug: bool
     antialiasing: bool
+    depth_threshold: float
 
 
 class GaussianRasterizer(nn.Module):

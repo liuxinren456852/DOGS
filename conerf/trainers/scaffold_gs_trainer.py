@@ -231,6 +231,7 @@ class ScaffoldGSTrainer(GaussianSplatTrainer):
             anti_aliasing=self.config.texture.anti_aliasing,
             visible_mask=visible_mask,
             use_trained_exposure=self.config.appearance.use_trained_exposure,
+            depth_threshold=self.config.geometry.depth_threshold,
             device=self.device,
         )
         colors, screen_space_points, visibility_filter = (
@@ -240,15 +241,16 @@ class ScaffoldGSTrainer(GaussianSplatTrainer):
         )
         offset_selection_mask = render_results["combined_mask"]
 
+        lambda_dssim = self.config.loss.lambda_dssim
+        lambda_scale = self.config.loss.lambda_scale
         pixels = camera.image.permute(2, 0, 1)  # [RGB, height, width]
 
         loss_rgb_l1 = F.l1_loss(colors, pixels)
         # loss_ssim = ssim(pixels, colors)
         loss_ssim = fused_ssim(colors.unsqueeze(0), pixels.unsqueeze(0))
         loss_scaling = render_results["scaling"].prod(dim=1).mean()
-        lambda_dssim = self.config.loss.lambda_dssim
         loss = (1.0 - lambda_dssim) * loss_rgb_l1 + \
-            lambda_dssim * (1.0 - loss_ssim) + 0.01 * loss_scaling
+            lambda_dssim * (1.0 - loss_ssim) + lambda_scale * loss_scaling
 
         loss.backward()
 
@@ -262,6 +264,7 @@ class ScaffoldGSTrainer(GaussianSplatTrainer):
         self.scalars_to_log["train/psnr"] = psnr.detach().item()
         self.scalars_to_log["train/loss"] = loss.detach().item()
         self.scalars_to_log["train/l1_loss"] = loss_rgb_l1.detach().item()
+        self.scalars_to_log["train/scale_loss"] = loss_scaling.detach().item()
         self.scalars_to_log["train/ema_loss"] = self.ema_loss
         self.scalars_to_log["train/points"] = self.gaussians.get_anchor.shape[0]
 

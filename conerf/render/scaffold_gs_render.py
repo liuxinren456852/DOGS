@@ -25,6 +25,7 @@ def render(
     override_color: torch.Tensor = None,
     separate_sh: bool = False,
     use_trained_exposure: bool = False,
+    depth_threshold: float = 0.0,
     device="cuda:0",
 ):
     # Get neural gaussian attributes.
@@ -60,6 +61,7 @@ def render(
         prefiltered=False,
         debug=pipeline_config.debug,
         antialiasing=anti_aliasing,
+        depth_threshold=depth_threshold,
     )
 
     rasterizer = GaussianRasterizer(raster_settings=raster_settings)
@@ -142,6 +144,7 @@ def prefilter_voxel(
         prefiltered=False,
         debug=pipeline_config.debug,
         antialiasing=False,
+        depth_threshold=0.0,
     )
 
     rasterizer = GaussianRasterizer(raster_settings=raster_settings)

@@ -109,6 +109,7 @@ namespace CudaRasterizer
 			float* dL_dsh,
 			float* dL_dscale,
 			float* dL_drot,
+			float* depth,
 			bool antialiasing,
 			bool debug);
 	};

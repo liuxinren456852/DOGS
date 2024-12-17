@@ -159,6 +159,7 @@ __global__ void computeCov2DCUDA(int P,
 	const float* dL_dinvdepth,
 	float3* dL_dmeans,
 	float* dL_dcov,
+	float* depth,
 	bool antialiasing)
 {
 	auto idx = cg::this_grid().thread_rank();
@@ -173,6 +174,7 @@ __global__ void computeCov2DCUDA(int P,
 	float3 mean = means[idx];
 	float3 dL_dconic = { dL_dconics[4 * idx], dL_dconics[4 * idx + 1], dL_dconics[4 * idx + 3] };
 	float3 t = transformPoint4x3(mean, view_matrix);
+	depth[idx] = t.z;
 	
 	const float limx = 1.3f * tan_fovx;
 	const float limy = 1.3f * tan_fovy;
@@ -683,6 +685,7 @@ void BACKWARD::preprocess(
 	float* dL_dsh,
 	glm::vec3* dL_dscale,
 	glm::vec4* dL_drot,
+	float* depth,
 	bool antialiasing)
 {
 	// Propagate gradients for the path of 2D conic matrix computation. 
@@ -705,6 +708,7 @@ void BACKWARD::preprocess(
 		dL_dinvdepth,
 		(float3*)dL_dmean3D,
 		dL_dcov3D,
+		depth,
 		antialiasing);
 
 	// Propagate gradients for remaining steps: finish 3D mean gradients,

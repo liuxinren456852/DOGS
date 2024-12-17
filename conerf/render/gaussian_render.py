@@ -25,6 +25,7 @@ def render(
     override_color: torch.Tensor = None,
     separate_sh: bool = False,
     use_trained_exposure: bool = False,
+    depth_threshold: float = 0.0,
     device="cuda:0",
 ):
     # Create zero tensor. We will use it to make pytorch return
@@ -37,7 +38,7 @@ def render(
     ) + 0
     try:
         screen_space_points.retain_grad()
-    except: # pylint: disable=W0702
+    except:  # pylint: disable=W0702
         pass
 
     # Set up rasterization configuration
@@ -58,10 +59,11 @@ def render(
         prefiltered=False,
         debug=pipeline_config.debug,
         antialiasing=anti_aliasing,
+        depth_threshold=depth_threshold,
     )
 
     rasterizer = GaussianRasterizer(raster_settings=raster_settings)
-    
+
     means3D = gaussian_splat_model.get_xyz
     means2D = screen_space_points
     opacity = gaussian_splat_model.get_opacity
@@ -135,7 +137,8 @@ def render(
 
     # Apply exposure to rendered image (training only)
     if use_trained_exposure:
-        exposure = gaussian_splat_model.get_exposure_from_id(viewpoint_camera.image_index)
+        exposure = gaussian_splat_model.get_exposure_from_id(
+            viewpoint_camera.image_index)
         rendered_image = torch.matmul(
             rendered_image.permute(1, 2, 0), exposure[:3, :3]
         ).permute(2, 0, 1) + exposure[:3, 3, None, None]
@@ -148,6 +151,7 @@ def render(
         "screen_space_points": screen_space_points,
         "visibility_filter": radii > 0,
         "radii": radii,
+        "scaling": scales,
         "depth": depth,
     }
 
@@ -175,7 +179,7 @@ def count_render(
     ) + 0
     try:
         screen_space_points.retain_grad()
-    except: # pylint: disable=W0702
+    except:  # pylint: disable=W0702
         pass
 
     # Set up rasterization configuration

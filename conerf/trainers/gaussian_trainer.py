@@ -492,6 +492,7 @@ class GaussianSplatTrainer(ImplicitReconTrainer):
             anti_aliasing=self.config.texture.anti_aliasing,
             separate_sh=True,
             use_trained_exposure=self.config.appearance.use_trained_exposure,
+            depth_threshold=self.config.geometry.depth_threshold,
             device=self.device,
         )
         colors, screen_space_points, visibility_filter, radii = (
@@ -503,6 +504,7 @@ class GaussianSplatTrainer(ImplicitReconTrainer):
 
         # Compute loss.
         lambda_dssim = self.config.loss.lambda_dssim
+        lambda_mask = self.config.loss.lambda_mask
         pixels = camera.image.permute(2, 0, 1)  # [RGB, height, width]
         # loss_ssim = ssim(pixels, colors)
         loss_ssim = fused_ssim(colors.unsqueeze(0), pixels.unsqueeze(0))
@@ -513,11 +515,14 @@ class GaussianSplatTrainer(ImplicitReconTrainer):
             loss_rgb_l1 = F.l1_loss(colors * mask, pixels)
             loss = (1.0 - lambda_dssim) * loss_rgb_l1 + \
                 lambda_dssim * (1.0 - loss_ssim) + \
-                0.5 * torch.mean((mask - 1) ** 2.) # Regularization for mask
+                lambda_mask * torch.mean((mask - 1) ** 2.) # Regularization for mask
         else:
             loss_rgb_l1 = F.l1_loss(colors, pixels)
             loss = (1.0 - lambda_dssim) * loss_rgb_l1 + \
                 lambda_dssim * (1.0 - loss_ssim)
+
+        loss_scaling = render_results["scaling"].prod(dim=1).mean()
+        loss += self.config.loss.lambda_scale * loss_scaling
 
         if self.admm_enabled:
             loss = self.add_admm_penalties(loss)
@@ -533,6 +538,7 @@ class GaussianSplatTrainer(ImplicitReconTrainer):
         self.scalars_to_log["train/psnr"] = psnr.detach().item()
         self.scalars_to_log["train/loss"] = loss.detach().item()
         self.scalars_to_log["train/l1_loss"] = loss_rgb_l1.detach().item()
+        self.scalars_to_log["train/scale_loss"] = loss_scaling.detach().item()
         self.scalars_to_log["train/ema_loss"] = self.ema_loss
         self.scalars_to_log["train/points"] = self.gaussians.get_xyz.shape[0]
 

@@ -30,7 +30,7 @@ trainer:
   visdom_server:
   visdom_port:
   n_tensorboard: 100
-  n_validation: 10000
+  n_validation: 5000 # 10000
   n_checkpoint: 10000
   distributed: false
   excluded_gpus: []
@@ -99,6 +99,7 @@ geometry:
   use_feat_bank: false
   # Common params as in original 3DGS.
   percent_dense: 0.01
+  depth_threshold: 0
   coarse-to-fine: false
   sample_more_high_resolution: false
   stat_start_iter: 500
@@ -124,3 +125,4 @@ pipeline:
 
 loss:
   lambda_dssim: 0.2
+  lambda_scale: 0.01

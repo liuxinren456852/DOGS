@@ -5,7 +5,7 @@ seed: 42
 
 dataset:
   name: mipnerf360
-  root_dir: /home/user/datasets/${dataset.name}
+  root_dir: /home/yuchen/datasets/${dataset.name}
   scene: ["bicycle", "bonsai", "counter", "garden", "kitchen", "room", "stump", "flowers", "treehill"]
   train_split: train
   val_split: val
@@ -68,7 +68,7 @@ optimizer:
 
 geometry:
   percent_dense: 0.01
-  depth_threshold: 0 # 0.37
+  depth_threshold: 0
   coarse-to-fine: false
   sample_more_high_resolution: false
   densify_start_iter: 500
@@ -93,3 +93,5 @@ pipeline:
 
 loss:
   lambda_dssim: 0.2
+  lambda_scale: 0.01
+  lambda_mask: 0
