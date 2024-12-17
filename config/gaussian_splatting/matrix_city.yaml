@@ -1,0 +1,94 @@
+neural_field_type: gs
+expname: ${neural_field_type}_${task}_${dataset.name}_${dataset.scene}
+task: novel_view_synthesis
+seed: 42
+
+dataset:
+  name: MatrixCity
+  root_dir: /home/usr/datasets/${dataset.name}
+  scene: "small_city/aerial"
+  train_split: train
+  val_split: val
+  data_split_json: ""
+  factor: 1
+  val_interval: 100
+  apply_mask: false
+  multi_blocks: false
+  num_blocks: 1
+  bbox_scale_factor: [1.0,1.0,1.0]
+  scale: true
+  rotate: false
+  cache_to_host: true
+  batch_over_images: false
+
+trainer:
+  max_iterations: 100000
+  ckpt_path: ""
+  no_load_opt: false
+  no_load_scheduler: false
+  enable_tensorboard: true
+  enable_visdom: false
+  visdom_server:
+  visdom_port:
+  n_tensorboard: 30
+  n_validation: 10000
+  n_checkpoint: 50000
+  distributed: true
+  excluded_gpus: []
+  num_workers: 4
+  local_rank: 0
+
+prune:
+  iterations: [] # [24000, 48000, 72000]
+  v_pow: 0.1
+  prune_decay: 0.6
+  prune_percent: 0.5
+
+optimizer:
+  lr:
+    # Gaussian centers related.
+    position_init: 0.00016
+    position_final: 0.0000016
+    position_delay_mult: 0.01
+    position_max_iterations: ${trainer.max_iterations}
+    # Exposure related.
+    exposure_lr_init: 0.01
+    exposure_lr_final: 0.001
+    exposure_lr_delay_steps: 0
+    exposure_lr_delay_mult: 0
+    exposure_max_iterations: ${trainer.max_iterations}
+    # Other 3D GS properties.
+    feature: 0.0025
+    opacity: 0.025
+    scaling: 0.005
+    quaternion: 0.001
+    # Decoupled appearance encoding.
+    mask: 0.001
+
+geometry:
+  percent_dense: 0.001
+  sample_more_high_resolution: false
+  densify_start_iter: 1000
+  densify_end_iter: 30000
+  densification_interval: 400
+  opacity_reset_interval: 3000
+  densify_grad_threshold: 0.0002
+  scene_extent_scale: 0.1
+  mask: false
+
+texture:
+  max_sh_degree: 3
+  anti_aliasing: false
+
+appearance:
+  use_trained_exposure: false
+
+pipeline:
+  convert_SHs_python: false
+  compute_cov3D_python: false
+  debug: false
+
+loss:
+  lambda_dssim: 0.2
+  lambda_scale: 0.01
+  lambda_mask: 0
