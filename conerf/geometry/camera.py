@@ -89,6 +89,7 @@ class Camera(nn.Module):
         fy: float,
         cx: float,
         cy: float,
+        image_path: str,
         image: torch.Tensor,
         width: int = None,
         height: int = None,
@@ -101,11 +102,12 @@ class Camera(nn.Module):
 
         self.device = device
         self.image_index = image_index
-        self.image = (copy.copy(image) / 255.0).clamp(0.0, 1.0).to(device) \
+        self.image_path = image_path
+        self.image = copy.copy(image).to(device) \
             if image is not None else None
         self.normal = None
         if normal is not None:
-            self.normal = (copy.copy(normal) / 255.0).clamp(0.0, 1.0).to(device)
+            self.normal = copy.copy(normal).to(device)
 
         if self.image is not None:
             self.width = self.image.shape[1]
@@ -132,23 +134,19 @@ class Camera(nn.Module):
         self.projective_matrix = self.world_to_camera @ self.projection_matrix
         self.camera_center = self.world_to_camera.inverse()[3, :3]
 
-        # optimizable parameters.
-        self.delta_rot = nn.Parameter(
-            torch.zeros(3, requires_grad=True, device=device)
-        )
-        self.delta_trans = nn.Parameter(
-            torch.zeros(3, requires_grad=True, device=device)
-        )
-
-        # self.exposure_a = nn.Parameter(
-        #     torch.tensor([0.0], requires_grad=True, device=device)
+        # # optimizable parameters.
+        # self.delta_rot = nn.Parameter(
+        #     torch.zeros(3, requires_grad=True, device=device)
         # )
-        # self.exposure_b = nn.Parameter(
-        #     torch.tensor([0.0], requires_grad=True, device=device)
+        # self.delta_trans = nn.Parameter(
+        #     torch.zeros(3, requires_grad=True, device=device)
         # )
 
     @torch.no_grad()
     def downsample(self, resolution: int = 1):
+        if resolution == 1:
+            return self
+
         fx = self.fx / resolution
         fy = self.fy / resolution
         cx = self.cx / resolution
@@ -159,7 +157,7 @@ class Camera(nn.Module):
         image = transform(self.image.permute(2, 0, 1)).permute(1, 2, 0)
         camera = Camera(
             self.image_index, self.world_to_camera.transpose(0, 1),
-            fx, fy, cx, cy, image * 255.0,
+            fx, fy, cx, cy, self.image_path, image,
             device=self.image.device
         )
         return camera
@@ -173,7 +171,8 @@ class Camera(nn.Module):
             'image_index': self.image_index,
             'width': self.width,
             'height': self.height,
-            'image': self.image * 255.,
+            'image_path': self.image_path,
+            # 'image': self.image,
             'fx': self.fx,
             'fy': self.fy,
             'cx': self.cx,
@@ -182,7 +181,7 @@ class Camera(nn.Module):
 
         # Normal is optional.
         if self.normal is not None:
-            state_dict['normal'] = self.normal * 255.
+            state_dict['normal'] = self.normal
 
         return state_dict
 
@@ -224,7 +223,9 @@ class Camera(nn.Module):
             fy=state_dict['fy'],
             cx=state_dict['cx'],
             cy=state_dict['cy'],
-            image=state_dict['image'] if read_image else None,
+            image_path=state_dict['image_path'],
+            # image=state_dict['image'] if read_image else None,
+            image=None,
             normal=normal,
             device=device,
         )
@@ -238,8 +239,8 @@ class Camera(nn.Module):
 
     def copy_to_device(self, device = "cuda:0"):
         """Deep copy camera data to device."""
-        image = self.image.to(device) * 255.0 if self.image is not None else None
-        normal = self.normal.to(device) * 255.0 if self.normal is not None else None
+        image = self.image.to(device) if self.image is not None else None
+        normal = self.normal.to(device) if self.normal is not None else None
         world_to_camera = self.world_to_camera.transpose(0, 1).to(device)
         camera = Camera(
             image_index=self.image_index,
@@ -250,6 +251,7 @@ class Camera(nn.Module):
             fy=self.fy,
             cx=self.cx,
             cy=self.cy,
+            image_path=self.image_path,
             image=image,
             normal=normal,
             device=device,

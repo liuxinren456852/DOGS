@@ -23,20 +23,19 @@ def inverse_pose(pose: torch.Tensor):
 
 def compose_camera(
     image_index: int,
+    image_path: str,
     image: torch.Tensor,
     camtoworld: torch.Tensor,
     intrinsics: torch.Tensor,
     normal: torch.Tensor = None,
+    channels: int = 3,
     device: str = "cuda:0",
 ) -> Camera:
-    channels = image.shape[-1]
+    # channels = image.shape[-1]
     if channels == 4:
-        background = np.array([0, 0, 0])
-        image = image.numpy() / 255.0
-        image = image[:, :, :3] * image[:, :, 3:4] + background * (1 - image[:, :, 3:4])
-        image = torch.from_numpy(image * 255.0).float()
         c2w = camtoworld
-        # Change from OpenGL/Blender camera axes (Y up, Z back) to COLMAP (Y down, Z forward)
+        # Change from OpenGL/Blender camera axes (Y up, Z back) to COLMAP
+        # (Y down, Z forward).
         c2w[:3, 1:3] *= -1
         world_to_cam = inverse_pose(c2w)
     else:
@@ -44,6 +43,7 @@ def compose_camera(
 
     fx, fy = intrinsics[0, 0], intrinsics[1, 1]
     cx, cy = intrinsics[0, 2], intrinsics[1, 2]
+    height, width = int(cy * 2), int(cx * 2)
     camera = Camera(
         image_index=image_index,
         world_to_camera=world_to_cam,
@@ -51,32 +51,40 @@ def compose_camera(
         fy=fy,
         cx=cx,
         cy=cy,
-        image=image, normal=normal,
+        image_path=image_path,
+        image=image,
+        width=width,
+        height=height,
+        normal=normal,
         device=device
     )
     return camera
 
 
 def compose_cameras(
+    image_paths: List[str],
     images: torch.Tensor,
     camtoworlds: torch.Tensor,
     intrinsics: torch.Tensor,
     normals: torch.Tensor = None,
+    channels: int = 3,
     device: str = "cuda:0",
 ) -> List:
     """
     Compose raw data into the 'Camera' class.
     """
     cameras = []
-    num_images = len(images)
+    num_images = len(camtoworlds)
     pbar = tqdm.trange(num_images, desc="Composing cameras")
     for i in range(num_images):
         camera = compose_camera(
             image_index=i,
-            image=images[i],
+            image_path=image_paths[i],
+            image=images[i] if images is not None else None,
             camtoworld=camtoworlds[i],
             intrinsics=intrinsics[i],
             normal=normals[i] if normals is not None else None,
+            channels=channels,
             device=device,
         )
         cameras.append(camera)
@@ -212,6 +220,7 @@ class DatasetBase(torch.utils.data.Dataset):
         if self.multi_blocks and split == "train":
             self._block_images, self._block_camtoworlds, self._block_intrinsics = \
                 data["rgbs"], data["poses"], data["intrinsics"]
+            block_image_paths = data['image_paths']
             block_normals = data["normals"]
 
             self._block_cameras = [None] * num_blocks
@@ -221,17 +230,21 @@ class DatasetBase(torch.utils.data.Dataset):
             for k in range(self.num_blocks):
                 normals = block_normals[k] if self.load_normal else None
                 self._block_cameras[k] = compose_cameras(
-                    self._block_images[k], self._block_camtoworlds[k], self._block_intrinsics[k],
+                    block_image_paths, self._block_images[k],
+                    self._block_camtoworlds[k], self._block_intrinsics[k],
                     normals=normals,
+                    channels=kwargs["num_channels"],
                     device='cpu' if self.cache_to_host else self.device,
                 )
         else:
-            images, camtoworlds, intrinsics = data["rgbs"], data["poses"], data["intrinsics"]
+            images, camtoworlds, intrinsics, image_paths = \
+                data["rgbs"], data["poses"], data["intrinsics"], data["image_paths"]
             normals = data["normals"] if self.load_normal else None
             if not self.batch_over_images:
                 self._cameras = compose_cameras(
-                    images, camtoworlds, intrinsics,
+                    image_paths, images, camtoworlds, intrinsics,
                     normals=normals,
+                    channels=kwargs["num_channels"],
                     device='cpu' if self.cache_to_host else self.device,
                 )
             else:
@@ -400,7 +413,6 @@ class DatasetBase(torch.utils.data.Dataset):
 
         # generate rays
         rgb = self.images[image_id][y, x].to(self.device) / 255.0  # (num_rays, 3/4)
-        # rgb = self.images[image_id, y, x] / 255.0  # (num_rays, 3/4)
 
         if self.apply_mask:
             mask = self.masks[image_id, y, x].to(self.device) / 255.0

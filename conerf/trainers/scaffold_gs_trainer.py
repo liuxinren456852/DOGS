@@ -1,6 +1,7 @@
 # pylint: disable=[E1101,W0201]
 
-from random import randint
+import copy
+import random
 
 from omegaconf.omegaconf import OmegaConf
 import torch
@@ -8,6 +9,7 @@ import torch.nn.functional as F
 import numpy as np
 
 from conerf.base.model_base import ModelBase
+from conerf.base.task_queue import ImageReader
 # from conerf.loss.ssim_torch import ssim
 from conerf.model.gaussian_fields.scaffold_gs import ScaffoldGS
 from conerf.render.scaffold_gs_render import render, prefilter_voxel
@@ -162,7 +164,8 @@ class ScaffoldGSTrainer(GaussianSplatTrainer):
         self.exposure_optimizer = None
         self.exposure_scheduler = None
         if self.config.appearance.use_trained_exposure:
-            self.exposure_optimizer = torch.optim.Adam([self.gaussians.get_exposure])
+            self.exposure_optimizer = torch.optim.Adam(
+                [self.gaussians.get_exposure])
             self.exposure_scheduler = ExponentialLR(
                 lr_init=lr_config.exposure_lr_init,
                 lr_final=lr_config.exposure_lr_final,
@@ -208,11 +211,45 @@ class ScaffoldGSTrainer(GaussianSplatTrainer):
         self.gaussians.train()
         self.update_learning_rate()
 
+        # Training finished and safely exit.
+        if (self.iteration - 1) >= self.config.trainer.max_iterations:
+            # print(f'iteration: {self.iteration}')
+            # print('shutting down')
+            # self.image_reader.shutdown()
+            # print('clear queue!')
+            # self.image_reader.queue.clear()
+            # self.image_reader.image_queue.queue.clear()
+            # print('waiting task to finish')
+            # self.image_reader.join()
+            # self.image_reader.image_queue.join()
+            # print('empty threads')
+            # self.image_reader.empty_threads()
+            # print('end!')
+            self.image_reader.safe_exit()
+            return
+        
         # Pick a random camera.
-        if not self.viewpoint_stack:
-            self.viewpoint_stack = self.train_dataset.cameras.copy()
-        camera = self.viewpoint_stack.pop(
-            randint(0, len(self.viewpoint_stack) - 1))
+        if (self.iteration - 1) % len(self.train_cameras) == 0:
+            random.shuffle(self.train_cameras)
+            image_list = [camera.image_path for camera in self.train_cameras]
+
+            # Ensure all items in the queue have been gotten and processed
+            # in the last epoch.
+            if self.image_reader is not None:
+                # self.image_reader.join()
+                # self.image_reader.image_queue.join()
+                # self.image_reader.empty_threads()
+                self.image_reader.safe_exit()
+
+            self.image_reader = ImageReader(
+                num_channels=self.config.dataset.get('num_channels', 3),
+                image_list=image_list
+            )
+            self.image_reader.add_task(None)
+
+        image_index, image = self.image_reader.get_image()
+        camera = copy.deepcopy(self.train_cameras[image_index])
+        camera.image = copy.deepcopy(image)
         resolution = self.training_resolution()
         camera = camera.downsample(resolution).copy_to_device(self.device)
         self.scalars_to_log['train/resolution'] = resolution

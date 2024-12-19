@@ -12,6 +12,7 @@ dataset:
   data_split_json: ""
   factor: 1
   val_interval: 0
+  num_channels: 4  # RGBA
   apply_mask: false
   multi_blocks: false
   num_blocks: 1

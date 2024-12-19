@@ -384,6 +384,7 @@ def create_dataset(
         "load_specified_images": config.dataset.get("load_specified_images", False),
         "cache_to_host": config.dataset.get("cache_to_host", False),
         "load_normal": config.dataset.get("load_normal", False),
+        "num_channels": config.dataset.get("num_channels", 3),
         "device": device,
         "mx": config.dataset.get("mx", None),
         "my": config.dataset.get("my", None),

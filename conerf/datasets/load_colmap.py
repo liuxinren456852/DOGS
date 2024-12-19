@@ -60,10 +60,11 @@ def load_images(image_indices: np.array, image_paths: List, image_split: str = "
     pbar = tqdm.trange(len(image_indices), desc=f"Loading {image_split} images")
     for image_index, image_path in enumerate(image_paths):
         if image_index in image_indices:
-            # images.append(imageio.imread(image_path))
-            images.append(torch.from_numpy(imageio.imread(image_path)).to(torch.uint8))
+            image = torch.from_numpy(imageio.imread(image_path)).to(torch.uint8)
+            image = (image / 255.0).clamp(0.0, 1.0)
+            images.append(image)
             pbar.update(1)
-    # images = np.stack(images, axis=0)
+    
     return images
 
 
@@ -75,14 +76,16 @@ def scratch_data(
     intrinsics: np.array,
     split: str = "train"
 ) -> Dict:
-    val_images = load_images(indices, image_paths, split)
-    val_normals = load_images(indices, normal_paths, split+"/normal")
+    images = load_images(indices, image_paths, split) \
+        if split != "train" else None
+    normals = load_images(indices, normal_paths, split+"/normal") \
+        if split != "train" else None
     camtoworlds = torch.from_numpy(poses[indices]).float()
     intrinsics = torch.from_numpy(intrinsics[indices]).float()
 
     return {
-        "rgbs": val_images,
-        "normals": val_normals,
+        "rgbs": images,
+        "normals": normals,
         "poses": camtoworlds,
         "intrinsics": intrinsics,
         "image_paths": [image_paths[i] for i in indices],
@@ -400,9 +403,10 @@ def load_colmap(
     ply_path = os.path.join(block_save_dir, "cluster_points3D.txt")
     save_colmap_ply(all_xyz, all_rgb, ply_path)
 
-    block_images, block_camtoworlds = [None] * num_blocks, [None] * num_blocks
+    block_camtoworlds = [None] * num_blocks
     block_normals = [None] * num_blocks
     block_intrinsics = [None] * num_blocks
+    block_image_paths = [None] * num_blocks
 
     pbar = tqdm.trange(num_blocks, desc=f"Loading {split} images for {num_blocks} Blocks")
     for block_id in block_image_ids:
@@ -418,7 +422,7 @@ def load_colmap(
         normal_list = []
         for image_index, image_path in enumerate(image_paths):
             if image_index in indices and image_index not in all_val_indices:
-                image_list.append(torch.from_numpy(imageio.imread(image_path)).to(torch.uint8))
+                image_list.append(image_path)
                 local_camtoworlds.append(camtoworlds[image_index])
                 local_intrinsics.append(intrinsics[image_index])
                 if load_normal:
@@ -426,7 +430,7 @@ def load_colmap(
                         imageio.imread(normal_paths[image_index])).to(torch.uint8)
                     )
 
-        block_images[block_id] = image_list
+        block_image_paths[block_id] = image_list
         block_normals[block_id] = normal_list
         block_camtoworlds[block_id]  = torch.from_numpy(np.stack(local_camtoworlds, axis=0)).float()
         block_intrinsics[block_id] = torch.from_numpy(np.stack(local_intrinsics, axis=0)).float()
@@ -436,10 +440,11 @@ def load_colmap(
     save_colmap_images(block_camtoworlds, num_images, block_save_dir)
 
     return {
-        "rgbs": block_images,
-        "normals": block_normals,
+        "rgbs": None, # block_images,
+        "normals": None, # block_normals,
         "poses": block_camtoworlds,
-        "intrinsics": block_intrinsics
+        "intrinsics": block_intrinsics,
+        "image_paths": block_image_paths,
     }
 
 
