@@ -216,7 +216,7 @@ def visualize_scene(
 
 
 def visualize_single_scene(
-    point_cloud: List[str],
+    point_cloud: o3d.geometry.PointCloud,
     camera_poses: np.ndarray,
     camera_pose_labels: np.ndarray = None,
     size: float = 0.1,
@@ -249,9 +249,8 @@ def visualize_single_scene(
     vis.add_geometry(line_set)
 
     # Create axes
-    # axes = o3d.geometry.TriangleMesh.create_coordinate_frame(size=1.0, origin=[0, 0, 0])
-    # vis.add_geometry(axes)
-    # vis.get_render_option().show_coordinate_frame = True
+    axes = o3d.geometry.TriangleMesh.create_coordinate_frame(size=1.0, origin=[0, 0, 0])
+    vis.add_geometry(axes)
     vis.get_render_option().line_width = 5
     vis.get_render_option().point_size = 1
 
