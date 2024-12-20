@@ -198,7 +198,6 @@ class DatasetBase(torch.utils.data.Dataset):
         self.color_bkgd_aug = color_bkgd_aug
         self.batch_over_images = batch_over_images
         self.multi_blocks = multi_blocks
-        self.change_world_frame = False
         self.masks = None
         self.bbox_scale_factor = kwargs["bbox_scale_factor"] if "bbox_scale_factor" \
             in kwargs.keys() else [1.0, 1.0, 1.0]
@@ -206,7 +205,6 @@ class DatasetBase(torch.utils.data.Dataset):
         self.rotate = kwargs["rotate"]
         self.model_folder = kwargs["model_folder"]
         self.load_specified_images = kwargs["load_specified_images"]
-        self.cache_to_host = kwargs["cache_to_host"]
         self.load_normal = False if "load_normal" not in kwargs else kwargs["load_normal"]
         self.device = kwargs["device"]
         self.mx = kwargs["mx"]
@@ -234,7 +232,7 @@ class DatasetBase(torch.utils.data.Dataset):
                     self._block_camtoworlds[k], self._block_intrinsics[k],
                     normals=normals,
                     channels=kwargs["num_channels"],
-                    device='cpu' if self.cache_to_host else self.device,
+                    device='cpu',
                 )
         else:
             images, camtoworlds, intrinsics, image_paths = \
@@ -245,7 +243,7 @@ class DatasetBase(torch.utils.data.Dataset):
                     image_paths, images, camtoworlds, intrinsics,
                     normals=normals,
                     channels=kwargs["num_channels"],
-                    device='cpu' if self.cache_to_host else self.device,
+                    device='cpu',
                 )
             else:
                 self._images = images
@@ -297,7 +295,7 @@ class DatasetBase(torch.utils.data.Dataset):
 
     def to_device(self):
         """Move related data (images, camera poses) to device."""
-        if self.cache_to_host and self.training:
+        if self.training:
             print('[WARNING] Data are required to cached on CPU, ' +
                   'cannot be moved to GPU currently.')
             return

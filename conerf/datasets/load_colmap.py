@@ -103,8 +103,8 @@ def cluster_image_in_grid(
     my: int = 1,
 ):
     points3d = camtoworlds[..., :3, -1]
-    # y-axis points towards to downward afater Manhattan world alignment, we swap
-    # the z-coordinates with y-coordiantes for ease of use.
+    # y-axis points towards to downward after Manhattan world alignment, we swap
+    # the z-coordinates with y-coordinates for ease of use.
     t_points3d = swap_points3d_yz(points3d)
     labels, bboxes, exp_bboxes, transform_world_to_obb = Grid2DClustering(
         points=t_points3d,

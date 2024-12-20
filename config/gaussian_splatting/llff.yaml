@@ -17,7 +17,6 @@ dataset:
   num_blocks: 1
   scale: false
   rotate: false
-  cache_to_host: true
   batch_over_images: false
   model_folder: sparse
   init_ply_type: sparse

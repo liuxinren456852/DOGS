@@ -20,7 +20,6 @@ dataset:
   bbox_scale_factor: [1.2,1.2,1.2]
   scale: false # urban3d scenes are aligned with ground plane under the manhattan world assumption
   rotate: false # urban3d scenes are aligned with ground plane under the manhattan world assumption
-  cache_to_host: true
   batch_over_images: false
 
 trainer:

@@ -382,7 +382,6 @@ def create_dataset(
         "rotate": config.dataset.get("rotate", True),
         "model_folder": config.dataset.get("model_folder", "sparse"),
         "load_specified_images": config.dataset.get("load_specified_images", False),
-        "cache_to_host": config.dataset.get("cache_to_host", False),
         "load_normal": config.dataset.get("load_normal", False),
         "num_channels": config.dataset.get("num_channels", 3),
         "device": device,
@@ -412,9 +411,5 @@ def create_dataset(
         batch_over_images=config.dataset.get("batch_over_images", True),
         **dataset_kwargs,
     )
-
-    if not dataset_kwargs["cache_to_host"]:
-        dataset.to_device()
-    # dataset.K = dataset.K.to(device)
 
     return dataset
