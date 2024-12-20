@@ -14,7 +14,7 @@ import tqdm
 from conerf.datasets.utils import (
     minify, points_in_bbox2D, get_block_info_dir,
     store_ply, fetch_ply, save_bounding_boxes, save_colmap_ply, save_colmap_images,
-    compute_rainbow_color, swap_points3d_yz
+    compute_rainbow_color, swap_points3d_yz, compute_bounding_box3D
 )
 from conerf.geometry.cluster import Grid2DClustering
 from conerf.pycolmap.pycolmap.scene_manager import SceneManager
@@ -27,7 +27,7 @@ from scripts.preprocess.colmap_to_nerf import (
 
 def find_all_images_with_subdir(image_dir: str) -> List:
     image_names = []
-    for root, dirs, files in os.walk(image_dir): # pylint: disable=W0612
+    for root, dirs, files in os.walk(image_dir):  # pylint: disable=W0612
         for file in files:
             full_image_name = os.path.join(root, file)
             image_name_start_index = len(image_dir)
@@ -56,15 +56,17 @@ def load_images(image_indices: np.array, image_paths: List, image_split: str = "
     images = []
     if len(image_paths) == 0:
         return images
-    
-    pbar = tqdm.trange(len(image_indices), desc=f"Loading {image_split} images")
+
+    pbar = tqdm.trange(len(image_indices),
+                       desc=f"Loading {image_split} images")
     for image_index, image_path in enumerate(image_paths):
         if image_index in image_indices:
-            image = torch.from_numpy(imageio.imread(image_path)).to(torch.uint8)
+            image = torch.from_numpy(
+                imageio.imread(image_path)).to(torch.uint8)
             image = (image / 255.0).clamp(0.0, 1.0)
             images.append(image)
             pbar.update(1)
-    
+
     return images
 
 
@@ -126,7 +128,8 @@ def cluster_image_in_grid(
 
     block_image_ids = dict()
     for block_id, bbox in enumerate(exp_bboxes):
-        image_ids = points_in_bbox2D(t_points3d[:, :2], bbox, transform_world_to_obb)
+        image_ids = points_in_bbox2D(
+            t_points3d[:, :2], bbox, transform_world_to_obb)
 
         if block_id not in block_image_ids:
             block_image_ids[block_id] = list()
@@ -160,7 +163,8 @@ def cluster_points_in_grid(
 
     block_points = dict()
     for block_id, bbox in enumerate(exp_bboxes):
-        points_in_bbox_indices = points_in_bbox2D(t_points3d[:, :2], bbox, transform_world_to_obb)
+        points_in_bbox_indices = points_in_bbox2D(
+            t_points3d[:, :2], bbox, transform_world_to_obb)
         local_points3d = points3d[points_in_bbox_indices]
         local_colors = colors[points_in_bbox_indices]
         block_points[block_id] = local_points3d
@@ -185,9 +189,10 @@ def load_colmap(
     val_interval: int = 0,
     multi_blocks: bool = False,
     num_blocks: int = 1,
-    bbox_scale_factor: List = [1.0,1.0,1.0],
+    bbox_scale_factor: List = [1.0, 1.0, 1.0],
     scale: bool = True,
     rotate: bool = True,
+    use_manhattan_world: bool = False,
     model_folder: str = 'sparse',
     load_specified_images: bool = False,
     load_normal: bool = False,
@@ -197,7 +202,10 @@ def load_colmap(
     assert factor in [1, 2, 4, 8]
 
     data_dir = os.path.join(root_fp, subject_id)
-    colmap_dir = os.path.join(data_dir, model_folder, "0")
+    colmap_dir = os.path.join(
+        data_dir, model_folder,
+        "manhattan_world" if use_manhattan_world else "0"
+    )
 
     train_image_name = []
     if load_specified_images:
@@ -218,7 +226,7 @@ def load_colmap(
         minify(basedir=data_dir, factors=[factor])
 
     ply_path = os.path.join(colmap_dir, "points3D.ply")
-    
+
     manager = SceneManager(colmap_dir, load_points=True)
     manager.load()
 
@@ -234,7 +242,7 @@ def load_colmap(
     for k in colmap_image_data:
         im_data = colmap_image_data[k]
         if load_specified_images and len(train_image_name) > 0 \
-            and im_data.name not in train_image_name:
+                and im_data.name not in train_image_name:
             continue
         image_names.append(im_data.name)
 
@@ -248,7 +256,8 @@ def load_colmap(
         ))
 
         w2c = np.concatenate([
-            np.concatenate([im_data.R(), im_data.tvec.reshape(3, 1)], 1), bottom
+            np.concatenate(
+                [im_data.R(), im_data.tvec.reshape(3, 1)], 1), bottom
         ], axis=0)
         w2c_mats.append(w2c)
     w2c_mats = np.stack(w2c_mats, axis=0)
@@ -267,6 +276,24 @@ def load_colmap(
         image_id = image_name_to_image_id[image_name]
         image_index_to_image_id[image_index] = image_id
 
+    if use_manhattan_world:
+        # TODO(chenyu): Remove the `swap_points3d_yz` when `use_manhattan_world` is enabled.
+
+        # We use COLMAP's `model_orientation_aligner` to align the model axis such that
+        # the y-axis points towards downward. Therefore, we transform the coordinate axis
+        # to let the z-axis points towards the ground plane.
+        T = torch.tensor([
+            [1, 0, 0, 0],
+            [0, 0, 1, 0],
+            [0, -1, 0, 0],
+            [0, 0, 0, 1]
+        ], dtype=torch.float32)
+        camtoworlds = np.einsum("nij, ki -> nkj", camtoworlds, T)
+        points3d = (T[:3, :3] @ points3d.T).T  # [Np, 3]
+
+        bbox_path = os.path.join(colmap_dir, "bounding_box.txt")
+        bounding_box = compute_bounding_box3D(points3d)
+        save_bounding_boxes([bounding_box], bbox_path)
     if scale:
         # normalize the scene
         T, scale = similarity_from_cameras(
@@ -275,7 +302,8 @@ def load_colmap(
         camtoworlds = np.einsum("nij, ki -> nkj", camtoworlds, T)
         camtoworlds[:, :3, 3:4] *= scale
 
-        points3d = scale * (T[:3, :3] @ points3d.T + T[:3, 3][..., None]).T # [Np, 3]
+        points3d = scale * (T[:3, :3] @ points3d.T +
+                            T[:3, 3][..., None]).T  # [Np, 3]
 
         if rotate:
             # Rotate the scene to align with ground plane.
@@ -299,7 +327,8 @@ def load_colmap(
     image_dir_suffix = f"_{factor}" if factor > 1 else ""
     image_folder = "images" if root_fp.find('MatrixCity') < 0 else ""
     colmap_image_dir = os.path.join(data_dir, image_folder).rstrip('/')
-    image_dir = os.path.join(data_dir, image_folder + image_dir_suffix).rstrip('/')
+    image_dir = os.path.join(data_dir, image_folder +
+                             image_dir_suffix).rstrip('/')
     for d in [image_dir, colmap_image_dir]:
         if not os.path.exists(d):
             raise ValueError(f"Image folder {d} does not exist.")
@@ -318,7 +347,8 @@ def load_colmap(
         normal_dir = os.path.join(data_dir, "normals" + image_dir_suffix)
         for image_path in image_paths:
             ext = os.path.splitext(image_path)[1]
-            normal_path = image_path.replace(image_dir, normal_dir).replace(ext, '.png')
+            normal_path = image_path.replace(
+                image_dir, normal_dir).replace(ext, '.png')
             normal_paths.append(normal_path)
 
     ################################## For test set #################################
@@ -376,8 +406,10 @@ def load_colmap(
     block_save_dir = get_block_info_dir(data_dir, num_blocks, mx, my)
     os.makedirs(block_save_dir, exist_ok=True)
     bboxes_path = os.path.join(block_save_dir, "bounding_boxes.txt")
-    origin_bboxes_path = os.path.join(block_save_dir, "bounding_boxes_origin.txt")
-    obb_transform_path = os.path.join(block_save_dir, "world_to_obb_transform.npy")
+    origin_bboxes_path = os.path.join(
+        block_save_dir, "bounding_boxes_origin.txt")
+    obb_transform_path = os.path.join(
+        block_save_dir, "world_to_obb_transform.npy")
 
     block_image_ids, camera_bboxes, exp_camera_bboxes, image_world_to_obb = cluster_image_in_grid(
         camtoworlds, block_save_dir, all_indices, bbox_scale_factor,
@@ -387,8 +419,10 @@ def load_colmap(
         points3d, colors, block_save_dir, bbox_scale_factor,
         num_blocks, mx, my, image_world_to_obb,
     )
-    save_bounding_boxes(exp_camera_bboxes.tolist() + exp_point_bboxes.tolist(), bboxes_path, 'w')
-    save_bounding_boxes(camera_bboxes.tolist() + point_bboxes.tolist(), origin_bboxes_path, 'w')
+    save_bounding_boxes(exp_camera_bboxes.tolist() +
+                        exp_point_bboxes.tolist(), bboxes_path, 'w')
+    save_bounding_boxes(camera_bboxes.tolist() +
+                        point_bboxes.tolist(), origin_bboxes_path, 'w')
     with open(obb_transform_path, "wb") as npy_file:
         np.save(npy_file, image_world_to_obb)
 
@@ -408,7 +442,8 @@ def load_colmap(
     block_intrinsics = [None] * num_blocks
     block_image_paths = [None] * num_blocks
 
-    pbar = tqdm.trange(num_blocks, desc=f"Loading {split} images for {num_blocks} Blocks")
+    pbar = tqdm.trange(
+        num_blocks, desc=f"Loading {split} images for {num_blocks} Blocks")
     for block_id in block_image_ids:
         image_ids = sorted(block_image_ids[block_id])
         image_ids = np.array(image_ids)
@@ -416,7 +451,8 @@ def load_colmap(
 
         # Select the split.
         all_block_indices = list(range(0, image_ids.shape[0]))
-        indices = image_ids[np.array([i for i in all_block_indices])] # pylint: disable=R1721
+        indices = image_ids[np.array(
+            [i for i in all_block_indices])]  # pylint: disable=R1721
 
         image_list, local_camtoworlds, local_intrinsics = [], [], []
         normal_list = []
@@ -432,16 +468,18 @@ def load_colmap(
 
         block_image_paths[block_id] = image_list
         block_normals[block_id] = normal_list
-        block_camtoworlds[block_id]  = torch.from_numpy(np.stack(local_camtoworlds, axis=0)).float()
-        block_intrinsics[block_id] = torch.from_numpy(np.stack(local_intrinsics, axis=0)).float()
+        block_camtoworlds[block_id] = torch.from_numpy(
+            np.stack(local_camtoworlds, axis=0)).float()
+        block_intrinsics[block_id] = torch.from_numpy(
+            np.stack(local_intrinsics, axis=0)).float()
 
         pbar.update(1)
 
     save_colmap_images(block_camtoworlds, num_images, block_save_dir)
 
     return {
-        "rgbs": None, # block_images,
-        "normals": None, # block_normals,
+        "rgbs": None,  # block_images,
+        "normals": None,  # block_normals,
         "poses": block_camtoworlds,
         "intrinsics": block_intrinsics,
         "image_paths": block_image_paths,
@@ -476,11 +514,12 @@ def similarity_from_cameras(c2w, strict_scaling):
         ]
     )
     if c > -1:
-        R_align = np.eye(3) + skew + (skew @ skew) * 1 / (1 + c) # pylint: disable=C0103
+        R_align = np.eye(3) + skew + (skew @ skew) * 1 / \
+            (1 + c)  # pylint: disable=C0103
     else:
         # In the unlikely case the original data has y+ up axis,
         # rotate 180-deg about x axis
-        R_align = np.array( # pylint: disable=C0103
+        R_align = np.array(  # pylint: disable=C0103
             [[-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
 
     #  R_align = np.eye(3) # DEBUG
@@ -553,7 +592,7 @@ def normalize_poses(
     if up_est_method == 'ground':
         # estimate up direction as the normal of the estimated ground plane
         # use RANSAC to estimate the ground plane in the point cloud
-        import pyransac3d as pyrsc # pylint: disable=C0415
+        import pyransac3d as pyrsc  # pylint: disable=C0415
 
         # Fix the seed every time we the load the dataset.
         random.seed(0)

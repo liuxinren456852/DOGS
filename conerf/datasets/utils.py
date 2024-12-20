@@ -148,6 +148,41 @@ def compute_bounding_box2D(
     return aabb
 
 
+def compute_bounding_box3D(
+    points: torch.Tensor,
+    scale_factor: List = [1.2, 1.2, 1.2],
+    p0 = 0.02,
+    p1 = 0.98
+) -> torch.Tensor:
+    """
+    Computing the axis-aligned bounding box for only foreground.
+
+    Args:
+        points [N, 3, 1]: points in world frame.
+        scale_factor: enlarge the bounding box by the scale factor in x-y-z axis.
+    Return:
+        bounding box
+    """
+    num_points = points.shape[0]
+    scale_factor = torch.tensor(scale_factor)
+    sorted_points, _ = torch.sort(points, dim=0)
+    P0, P1 = int(p0 * (num_points - 1)), int(p1 * (num_points - 1))
+    aabb = torch.tensor([sorted_points[P0, 0], sorted_points[P0, 1], sorted_points[P0, 2],
+                         sorted_points[P1, 0], sorted_points[P1, 1], sorted_points[P1, 2]])
+
+    A, B = aabb[:3], aabb[3:]
+    C = (A + B) / 2.0 # AABB center
+    half_diagonal_len = torch.linalg.norm(B - A) / 2.0
+    ca_ray_dir = (A - C) / torch.linalg.norm(A - C)
+    cb_ray_dir = (B - C) / torch.linalg.norm(B - C)
+    # Recomputing the bottom-left and the top-right corner points.
+    A = C + ca_ray_dir * scale_factor * half_diagonal_len
+    B = C + cb_ray_dir * scale_factor * half_diagonal_len
+
+    aabb = torch.concat([A, B], dim=0).reshape(2, 3)
+    return aabb
+
+
 def points_in_bbox2D(
     points: np.ndarray,
     bbox: np.ndarray,
@@ -167,6 +202,16 @@ def points_in_bbox2D(
             (A[1] <= points[:, 1]) & (points[:, 1] <= B[1])
         ).reshape(-1)
 
+    return point_indices
+
+
+def points_in_bbox3D(points: np.ndarray, bbox: np.ndarray):
+    A, B = bbox[0, :], bbox[1, :]
+    point_indices = (
+        (A[0] <= points[:, 0]) & (points[:, 0] <= B[0]) &
+        (A[1] <= points[:, 1]) & (points[:, 1] <= B[1]) &
+        (A[2] <= points[:, 2]) & (points[:, 2] <= B[2])
+    )
     return point_indices
 
 
@@ -380,6 +425,7 @@ def create_dataset(
         "apply_mask": apply_mask,
         "scale": config.dataset.get("scale", True),
         "rotate": config.dataset.get("rotate", True),
+        "use_manhattan_world": config.dataset.get("use_manhattan_world", False),
         "model_folder": config.dataset.get("model_folder", "sparse"),
         "load_specified_images": config.dataset.get("load_specified_images", False),
         "load_normal": config.dataset.get("load_normal", False),

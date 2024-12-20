@@ -14,6 +14,7 @@ COLMAP_DIR=/usr/local/bin
 COLMAP_EXE=$COLMAP_DIR/colmap
 
 mkdir $OUTPUT_PATH/sparse
+mkdir $OUTPUT_PATH/sparse/manhattan_world
 
 $COLMAP_EXE feature_extractor \
     --database_path=$OUTPUT_PATH/database.db \
@@ -45,3 +46,9 @@ $COLMAP_EXE mapper $OUTPUT_PATH \
     --output_path=$OUTPUT_PATH/sparse \
     --Mapper.num_threads=$NUM_THREADS \
     > $DATASET_PATH/log_sfm.txt 2>&1
+
+$COLMAP_EXE model_orientation_aligner \
+    --image_path=$DATASET_PATH/images \
+    --input_path=$OUTPUT_PATH/sparse/0 \
+    --output_path=$OUTPUT_PATH/sparse/manhattan_world \
+    > $DATASET_PATH/log_align_manhattan_world.txt 2>&1

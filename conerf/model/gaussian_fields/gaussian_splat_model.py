@@ -498,7 +498,15 @@ class GaussianSplatModel:
         ))
         self.prune_points(prune_filter, optimizer)
 
-    def densify_and_prune(self, max_grad, min_opacity, extent, max_screen_size, optimizer):
+    def densify_and_prune(
+        self,
+        max_grad,
+        min_opacity,
+        extent,
+        max_screen_size,
+        optimizer,
+        bounding_box=None,
+    ):
         grads = self.xyz_gradient_accum / self.denom
         grads[grads.isnan()] = 0.0
 
@@ -506,6 +514,11 @@ class GaussianSplatModel:
         self.densify_and_split(grads, max_grad, extent, optimizer)
 
         prune_mask = (self.get_opacity < min_opacity).squeeze()
+
+        if bounding_box is not None:
+            invalid_pos_mask = (self.get_xyz[:, 2] < bounding_box[2]).squeeze()
+            prune_mask = torch.logical_or(prune_mask, invalid_pos_mask)
+
         if max_screen_size is not None:
             big_points_vs = self.max_radii2D > max_screen_size
             big_points_ws = self.get_scaling.max(dim=1).values > 0.1 * extent

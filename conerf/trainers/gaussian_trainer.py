@@ -144,6 +144,11 @@ class GaussianSplatTrainer(ImplicitReconTrainer):
         # Initialize 3D Gaussians from COLMAP point clouds.
         data_dir = os.path.join(
             self.config.dataset.root_dir, self.config.dataset.scene)
+        colmap_dir = os.path.join(
+            data_dir, self.config.dataset.model_folder,
+            "manhattan_world" if self.config.dataset.get(
+                "use_manhattan_world", False) else "0"
+        )
         pcl_name = "points3D"
         if self.config.dataset.multi_blocks:
             pcl_name += f"_{self.train_dataset.current_block}"
@@ -155,9 +160,7 @@ class GaussianSplatTrainer(ImplicitReconTrainer):
         else:
             dense = '' if self.config.dataset.init_ply_type == "sparse" else "_dense"
             colmap_ply_path = os.path.join(
-                data_dir, self.config.dataset.model_folder, "0",
-                f"{pcl_name}{dense}.ply"
-            )
+                colmap_dir, f"{pcl_name}{dense}.ply")
             print(f'Initialize 3DGS using {colmap_ply_path}')
 
         point_cloud = fetch_ply(colmap_ply_path)
@@ -166,6 +169,8 @@ class GaussianSplatTrainer(ImplicitReconTrainer):
             image_idxs=self.train_camera_idxs
             if self.config.appearance.use_trained_exposure else None
         )
+        bounding_box = ImplicitReconTrainer.read_bounding_box(colmap_dir)
+        self.bounding_box = torch.tensor(bounding_box, dtype=torch.float32)
 
     def build_networks(self):
         self.model = GaussianSplatModel(
@@ -591,6 +596,7 @@ class GaussianSplatTrainer(ImplicitReconTrainer):
                         extent=self.spatial_lr_scale,
                         max_screen_size=size_threshold,
                         optimizer=self.optimizer,
+                        bounding_box=self.bounding_box,
                     )
 
                 if self.iteration % self.config.geometry.opacity_reset_interval == 0 or \

@@ -19,7 +19,7 @@ class ImplicitReconTrainer(BaseTrainer):
     Base class for training implicit 3D reconstruction models.
     """
 
-    def __init__( # pylint: disable=W0231
+    def __init__(  # pylint: disable=W0231
         self,
         config: OmegaConf,
         prefetch_dataset: bool = True,
@@ -91,6 +91,29 @@ class ImplicitReconTrainer(BaseTrainer):
             device=self.device,
         ) if self.val_dataset is not None else None
 
+    @classmethod
+    def read_bounding_box(cls, colmap_dir: str, suffix: str = ''):
+        bbox_path = os.path.join(colmap_dir, f"bounding_box{suffix}.txt")
+        if not os.path.exists(bbox_path):
+            return None
+
+        file = open(bbox_path, "r", encoding="utf-8")
+        file.readline()  # Omit the first line.
+
+        bbox = [None] * 6
+
+        line = file.readline()
+        while line:
+            data = line.split(' ')
+            bbox[0], bbox[1], bbox[2] = float(
+                data[0]), float(data[1]), float(data[2])
+            bbox[3], bbox[4], bbox[5] = float(
+                data[3]), float(data[4]), float(data[5])
+            line = file.readline()
+
+        file.close()
+        return bbox
+
     def reset_checkpoint_manager(self):
         """Reset checkpoint manager when output path changed."""
         self.ckpt_manager = CheckPointManager(
@@ -140,7 +163,7 @@ class ImplicitReconTrainer(BaseTrainer):
                 self.train_dataset.NEAR if self.train_dataset.NEAR > 0 else 0.2  # 0.01
             )
             self.far_plane = (
-                self.train_dataset.FAR if self.train_dataset.FAR > 0 else 1.0e3 # 1.0e3
+                self.train_dataset.FAR if self.train_dataset.FAR > 0 else 1.0e3  # 1.0e3
             )
             self.render_step_size = 1e-2  # 1e-3
             self.cone_angle = 10 ** (math.log10(self.far_plane) /
@@ -181,7 +204,7 @@ class ImplicitReconTrainer(BaseTrainer):
     def build_pose_refiner(self):
         if self.config.optimizer.get("lr_pose", None) is None:
             return
-        
+
         self.optimize_camera_poses = True
 
     def setup_optimizer(self):
@@ -193,7 +216,7 @@ class ImplicitReconTrainer(BaseTrainer):
 
     def setup_pose_optimizer(self):
         if self.config.get("pose_optimizer", None) is not None:
-            self.pose_optimizer = parse_optimizer( # pylint: disable=[W0201]
+            self.pose_optimizer = parse_optimizer(  # pylint: disable=[W0201]
                 self.config.pose_optimizer, self.delta_pose
             )
         if self.config.get("pose_scheduler", None) is not None:
@@ -206,7 +229,7 @@ class ImplicitReconTrainer(BaseTrainer):
                     self.config.pose_scheduler.lr_end / self.config.pose_optimizer.args.lr
                 ) ** (1. / self.config.trainer.max_iterations)
 
-            self.pose_scheduler = scheduler( # pylint: disable=[W0201]
+            self.pose_scheduler = scheduler(  # pylint: disable=[W0201]
                 self.pose_optimizer,
                 gamma=self.config.pose_scheduler.gamma
             )
@@ -217,11 +240,14 @@ class ImplicitReconTrainer(BaseTrainer):
     def record_memory_stats(self):
         stats = torch.cuda.memory_stats(self.device)
         # print(stats['allocated_bytes.all.current'])
-        self.scalars_to_log["memory/current"] = stats['allocated_bytes.all.current'] / (1024 ** 3)
-        self.scalars_to_log["memory/peak"] = stats['allocated_bytes.all.peak'] / (1024 ** 3)
+        self.scalars_to_log["memory/current"] = stats['allocated_bytes.all.current'] / (
+            1024 ** 3)
+        self.scalars_to_log["memory/peak"] = stats['allocated_bytes.all.peak'] / \
+            (1024 ** 3)
         self.scalars_to_log["memory/allocated"] = \
             stats['allocated_bytes.all.allocated'] / (1024 ** 3)
-        self.scalars_to_log["memory/freed"] = stats['allocated_bytes.all.freed'] / (1024 ** 3)
+        self.scalars_to_log["memory/freed"] = stats['allocated_bytes.all.freed'] / (
+            1024 ** 3)
 
     def update_meta_data(self):
         """Metadata that stored into checkpoint."""

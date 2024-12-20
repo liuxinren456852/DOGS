@@ -53,7 +53,7 @@ class SubjectLoader(DatasetBase):
         return load_colmap(
             root_fp, subject_id, split, factor,
             self.val_interval, self.multi_blocks, num_blocks,
-            self.bbox_scale_factor, self.scale, self.rotate,
+            self.bbox_scale_factor, self.scale, self.rotate, self.use_manhattan_world,
             self.model_folder, self.load_specified_images, self.load_normal,
             self.mx, self.my,
         )

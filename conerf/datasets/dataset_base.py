@@ -203,6 +203,7 @@ class DatasetBase(torch.utils.data.Dataset):
             in kwargs.keys() else [1.0, 1.0, 1.0]
         self.scale = kwargs["scale"]
         self.rotate = kwargs["rotate"]
+        self.use_manhattan_world = kwargs["use_manhattan_world"]
         self.model_folder = kwargs["model_folder"]
         self.load_specified_images = kwargs["load_specified_images"]
         self.load_normal = False if "load_normal" not in kwargs else kwargs["load_normal"]
