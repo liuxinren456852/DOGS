@@ -130,7 +130,7 @@ def read_poses_json_aerial_street_fusion(
         image_id = name_to_image_id[image_name]
         c2w = torch.from_numpy(np.array(frame["transform_matrix"])).float()
         c2w[:3, :3] = TO_MANHATTAN_WORLD @ c2w[:3, :3] @ MATRIX_CITY_TO_COLMAP
-        c2w[:3, :3] = TO_MANHATTAN_WORLD @ c2w[:3, :3]
+        c2w[:3, 3] = TO_MANHATTAN_WORLD @ c2w[:3, 3]
 
         w2c = torch.inverse(c2w)
         qvec = R.from_matrix(w2c[:3, :3].numpy()).as_quat()
