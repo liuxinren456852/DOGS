@@ -108,6 +108,9 @@ DATASET=mipnerf360
 We provide configuration files for training the `blender`, `llff`, `matrix_city`, `mipnerf360`, `tanks_and_temples` and `urban3d` datasets. We can also train our own dataset by setting the correct dataset path and scenes in `config/gaussian_splatting/custom.yaml`.
 
 #### Train 3DGS on multiple GPUs
+
+We are still brewing the distributed training code due to refactoring and testing. You can try the `admm` branch for a quick test: `git checkout admm`. Note since the code and CUDA rasterizer for training 3DGS are different to the code when finishing the experiments in the camera ready, it is suggested to evaluate the performance once the our pretrained models are released.
+
 Here we provide scripts and an example to show how to run DOGS on three compute nodes with 9 GPUs in total (1 GPU on a master node and 4 GPUs each of two slave nodes).
 
 Before running the program, we may need to modify the parameters in the provided scripts:
