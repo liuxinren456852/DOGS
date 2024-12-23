@@ -12,7 +12,6 @@ import numpy as np
 
 from conerf.base.model_base import ModelBase
 from conerf.base.task_queue import ImageReader
-from conerf.datasets.dataset_base import MiniDataset
 from conerf.datasets.utils import (
     fetch_ply, compute_nerf_plus_plus_norm, create_dataset, get_block_info_dir
 )

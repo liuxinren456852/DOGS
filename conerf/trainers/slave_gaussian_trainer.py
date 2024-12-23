@@ -1,110 +1,20 @@
 # pylint: disable=[E1101,R1719,W0201]
 
 import os
-import random
-import copy
-from typing import List
 from omegaconf import OmegaConf
 
 import torch
 import torch.nn.functional as F
-import numpy as np
 
 from conerf.base.model_base import ModelBase
-from conerf.base.task_queue import ImageReader
 from conerf.datasets.dataset_base import MiniDataset
-from conerf.datasets.utils import (
-    fetch_ply, compute_nerf_plus_plus_norm, create_dataset, get_block_info_dir
-)
-# from conerf.loss.ssim_torch import ssim
-from conerf.model.gaussian_fields.gaussian_splat_model import GaussianSplatModel
-from conerf.model.gaussian_fields.masks import AppearanceEmbedding
-from conerf.render.gaussian_render import render
-from conerf.model.gaussian_fields.prune import calculate_v_imp_score, prune_list
-from conerf.trainers.implicit_recon_trainer import ImplicitReconTrainer
+from conerf.datasets.utils import get_block_info_dir
 from conerf.trainers.gaussian_trainer import GaussianSplatTrainer
-from conerf.visualization.pose_visualizer import visualize_cameras
-
-from diff_gaussian_rasterization import SparseGaussianAdam
-from fused_ssim import fused_ssim
-
-
-# NOTE: We define a callable class instead of a closure since a closure cannot
-# be serialized by torch's rpc.
-class ExponentialLR:  # pylint: disable=[R0903]
-    def __init__(
-        self,
-        lr_init: float,
-        lr_final: float,
-        lr_delay_steps: int = 0,
-        lr_delay_mult: float = 1.0,
-        max_steps: int = 1000000
-    ):
-        self.lr_init = lr_init
-        self.lr_final = lr_final
-        self.lr_delay_steps = lr_delay_steps
-        self.lr_delay_mult = lr_delay_mult
-        self.max_steps = max_steps
-
-    def __call__(self, step):
-        if step < 0 or (self.lr_init == 0.0 and self.lr_final == 0.0):
-            return 0.0
-
-        if self.lr_delay_steps > 0:
-            delay_rate = self.lr_delay_mult + (1 - self.lr_delay_mult) * np.sin(
-                0.5 * np.pi * np.clip(step / self.lr_delay_steps, 0, 1)
-            )
-        else:
-            delay_rate = 1.0
-
-        t = np.clip(step / self.max_steps, 0, 1)
-        log_lerp = np.exp(np.log(self.lr_init) * (1 - t) +
-                          np.log(self.lr_final) * t)
-
-        return delay_rate * log_lerp
-
-
-def extract_pose_tensor_from_cameras(
-    cameras: List,
-    noises: torch.Tensor = None,
-    corrections: torch.Tensor = None,
-) -> torch.Tensor:
-    num_cameras = len(cameras)
-    poses = torch.zeros((num_cameras, 4, 4), dtype=torch.float32).cuda()
-
-    for i in range(num_cameras):
-        poses[i, :3, :3] = cameras[i].R
-        poses[i, :3, 3] = cameras[i].t
-        poses[i, 3, 3] = 1.0
-
-        # Add noise.
-        if noises is not None:
-            poses[i] = poses[i] @ noises[i]
-
-        # Correct noise.
-        if corrections is not None:
-            poses[i] = poses[i] @ corrections[i]
-
-    return poses
-
-
-def load_val_dataset(config: OmegaConf, device: str = 'cuda'):
-    val_config = copy.deepcopy(config)
-    val_config.dataset.multi_blocks = False
-    val_config.dataset.num_blocks = 1
-    val_dataset = create_dataset(
-        config=val_config,
-        split=val_config.dataset.val_split,
-        num_rays=None,
-        apply_mask=val_config.dataset.apply_mask,
-        device=device
-    )
-    return val_dataset
 
 
 class SlaveGaussianSplatTrainer(GaussianSplatTrainer):
     """
-    Trainer for 3D Gaussian Splatting model.
+    Trainer for 3D Gaussian Splatting model on slave nodes.
     """
 
     def __init__(
