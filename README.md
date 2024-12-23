@@ -102,8 +102,10 @@ cd scripts/preprocess
 #### Train 3DGS on a single GPU
 ```bash
 cd scripts/train
-./train_nvs.sh 0 $EXP_SUFFIX urban3d gaussian_splatting
+DATASET=mipnerf360
+./train_nvs.sh 0 $EXP_SUFFIX $DATASET gaussian_splatting
 ```
+We provide configuration files for training the `blender`, `llff`, `matrix_city`, `mipnerf360`, `tanks_and_temples` and `urban3d` datasets. We can also train our own dataset by setting the correct dataset path and scenes in `config/gaussian_splatting/custom.yaml`.
 
 #### Train 3DGS on multiple GPUs
 Here we provide scripts and an example to show how to run DOGS on three compute nodes with 9 GPUs in total (1 GPU on a master node and 4 GPUs each of two slave nodes).
