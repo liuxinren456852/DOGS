@@ -1,4 +1,6 @@
 3rd_party
+config/gaussian_splatting/custom.yaml
+config/scaffold_gs/custom.yaml
 submodules/diff-gaussian-rasterization/build
 submodules/diff-gaussian-rasterization/diff_gaussian_rasterization.egg-info
 submodules/simple-knn/build
