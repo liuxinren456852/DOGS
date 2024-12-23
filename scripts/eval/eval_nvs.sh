@@ -9,7 +9,6 @@ export CUDA_VISIBLE_DEVICES=${CUDA_IDS}
 DATASET='blender'                # [blender, dtu, tat]
 ENCODING='gaussian_splatting'    # [gaussian_splatting]
 SUFFIX=''
-COMPOSITE=''
 
 NUM_CMD_PARAMS=$#
 if [ $NUM_CMD_PARAMS -eq 2 ]
@@ -31,8 +30,6 @@ echo "Using yaml file: ${YAML}"
 
 HOME_DIR=$HOME
 CODE_ROOT_DIR=$HOME/'Projects/DOGS'
-# DATA_ROOT_DIR=$HOME/'Datasets'
-DATA_ROOT_DIR=$HOME
 
 cd $CODE_ROOT_DIR
 

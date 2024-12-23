@@ -92,5 +92,5 @@ if __name__ == "__main__":
             verbose=True,
         )
         evaluator.eval(split="val")
-        # evaluator.eval(split="test")
+        evaluator.eval(split="test")
         evaluator.export_mesh()

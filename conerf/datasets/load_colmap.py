@@ -365,7 +365,8 @@ def load_colmap(
         return {
             "rgbs": test_images,
             "poses": camtoworlds,
-            "intrinsics": torch.from_numpy(intrinsics).float()
+            "intrinsics": torch.from_numpy(intrinsics).float(),
+            "image_paths": [None] * n_test_traj_steps,
         }
 
     num_images = len(image_paths)

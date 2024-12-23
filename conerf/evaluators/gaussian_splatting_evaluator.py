@@ -161,9 +161,13 @@ class GaussianSplatEvaluator(Evaluator):
         num_blocks = len(self.models)
 
         meta_data = self.meta_data[0]
+        meta_data["split"] = split
         for k, model in enumerate(self.models):
-            model.eval()
-
+            if model.get_xyz.device == torch.device('cpu'):
+                model = model.to("cuda")
+            else:
+                model.eval()
+            
             # meta_data = self.meta_data[k]
             iteration = self.model_iterations[k] if iteration is None else iteration
 
@@ -182,7 +186,7 @@ class GaussianSplatEvaluator(Evaluator):
                 model.save_splat(splat_path)
 
                 ply_dir = os.path.join(val_dir, "ply")
-                os.makedirs(ply_dir)
+                os.makedirs(ply_dir, exist_ok=True)
                 ply_path = os.path.join(ply_dir, f"iter_{iteration}.ply")
                 model.save_ply(ply_path)
                 colmap_ply_path = os.path.join(
@@ -229,6 +233,13 @@ class GaussianSplatEvaluator(Evaluator):
                 'memory': avg_mem,
                 "points": model.get_xyz.shape[0],
             }
+
+            if split == "test":
+                video_name = os.path.join(eval_dir, 'render.mp4')
+                rendered_image_dir = os.path.join(image_dir, "rgb_test")
+                os.system(
+                    f"ffmpeg -framerate 5 -i {rendered_image_dir}/%3d.png " +
+                    f"-c:v libx264 -pix_fmt yuv420p {video_name}")
 
         metric_file = os.path.join(eval_dir, 'metrics.json')
         json_obj = json.dumps(metrics, indent=4)
@@ -278,9 +289,12 @@ class GaussianSplatEvaluator(Evaluator):
         colors = torch.clamp(colors, 0, 1)
         depth = colorize(depth.cpu().squeeze(0), cmap_name="jet")
 
-        colors_cc = color_correct(colors.permute(
-            1, 2, 0).numpy(), pixels.numpy())
-        colors_cc = torch.from_numpy(colors_cc).permute(2, 0, 1)
+        if meta_data["split"] == "val":
+            colors_cc = color_correct(colors.permute(
+                1, 2, 0).numpy(), pixels.numpy())
+            colors_cc = torch.from_numpy(colors_cc).permute(2, 0, 1)
+        else:
+            colors_cc = colors
 
         image_dict = {}
         image_dict["rgb_gt"] = pixels
@@ -290,12 +304,14 @@ class GaussianSplatEvaluator(Evaluator):
         save_images(save_dir=eval_dir,
                     image_dict=image_dict, index=image_index)
 
-        pixels = pixels[None, ...].to(self.device).permute(0, 3, 1, 2)
-        colors_cc = colors_cc[None, ...].to(
-            self.device)  # .permute(0, 3, 1, 2)
-        psnr = compute_psnr(pixels, colors_cc).item()
-        ssim = compute_ssim(pixels, colors_cc)
-        lpips = compute_lpips(self.lpips_loss, pixels, colors_cc)
+        if meta_data["split"] == "val":
+            pixels = pixels[None, ...].to(self.device).permute(0, 3, 1, 2)
+            colors_cc = colors_cc[None, ...].to(self.device)
+            psnr = compute_psnr(pixels, colors_cc).item()
+            ssim = compute_ssim(pixels, colors_cc)
+            lpips = compute_lpips(self.lpips_loss, pixels, colors_cc)
+        else:
+            psnr, ssim, lpips = 0, 0, 0
 
         return psnr, ssim, lpips, render_time, render_max_mem
 
