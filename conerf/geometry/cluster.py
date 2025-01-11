@@ -163,9 +163,9 @@ def Grid2DClustering(
     for k, cell_box in enumerate(grid_cells):
         ratio_points = float(avg_block_points) / float(num_block_points[k])
         exp_scale_factor = scale_factor
-        # Smaller blocks should be expanded more aggressively.
-        if ratio_points >= 1.2:
-            exp_scale_factor = [1.2 * factor for factor in scale_factor]
+        # # Smaller blocks should be expanded more aggressively.
+        # if ratio_points >= 1.2:
+        #     exp_scale_factor = [1.2 * factor for factor in scale_factor]
         print(f'aggressive expanding bounding box with scale factor: {exp_scale_factor}')
 
         exp_cell_box = expand_bounding_box(
