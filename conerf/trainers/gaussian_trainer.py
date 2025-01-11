@@ -112,22 +112,11 @@ class GaussianSplatTrainer(ImplicitReconTrainer):
         trainset=None,
         valset=None,
         model: ModelBase = None,
+        appear_embedding: torch.nn.Module = None,
         block_id: int = None,
         device_id: int = 0,
     ) -> None:
         self.gaussians = None
-
-        # if trainset is None and block_id is not None:
-        #     mx = config.dataset.get("mx", None)  # pylint: disable=C0103
-        #     my = config.dataset.get("my", None)  # pylint: disable=C0103
-        #     data_dir = os.path.join(
-        #         config.dataset.root_dir, config.dataset.scene)
-        #     data_dir = get_block_info_dir(
-        #         data_dir, config.dataset.num_blocks, mx, my)
-        #     block_dir = os.path.join(data_dir, f'block_{block_id}')
-        #     trainset = MiniDataset(
-        #         cameras=[], camtoworlds=None, block_id=block_id)
-        #     trainset.read(path=block_dir, block_id=block_id, device='cpu')
 
         if valset is None:
             valset = load_val_dataset(config, 'cpu')
@@ -135,7 +124,7 @@ class GaussianSplatTrainer(ImplicitReconTrainer):
         self.admm_enabled = False
 
         super().__init__(config, prefetch_dataset,
-                         trainset, valset, model, block_id, device_id)
+                         trainset, valset, model, appear_embedding, block_id, device_id)
 
     def init_gaussians(self):
         # Using semantic alias to better understand the code.
@@ -144,7 +133,7 @@ class GaussianSplatTrainer(ImplicitReconTrainer):
         data_dir = os.path.join(
             self.config.dataset.root_dir, self.config.dataset.scene)
         colmap_dir = os.path.join(
-            data_dir, self.config.dataset.model_folder,
+            data_dir, self.config.dataset.get("model_folder", "sparse"), # model_folder,
             "manhattan_world" if self.config.dataset.get(
                 "use_manhattan_world", False) else "0"
         )
@@ -160,7 +149,7 @@ class GaussianSplatTrainer(ImplicitReconTrainer):
             dense = '' if self.config.dataset.init_ply_type == "sparse" else "_dense"
             colmap_ply_path = os.path.join(
                 colmap_dir, f"{pcl_name}{dense}.ply")
-            print(f'Initialize 3DGS using {colmap_ply_path}')
+        print(f'Initialize 3DGS using {colmap_ply_path}')
 
         point_cloud = fetch_ply(colmap_ply_path)
         self.gaussians.init_from_colmap_pcd(
@@ -169,7 +158,8 @@ class GaussianSplatTrainer(ImplicitReconTrainer):
             if self.config.appearance.use_trained_exposure else None
         )
         bounding_box = ImplicitReconTrainer.read_bounding_box(colmap_dir)
-        self.bounding_box = torch.tensor(bounding_box, dtype=torch.float32)
+        self.bounding_box = torch.tensor(bounding_box, dtype=torch.float32) \
+            if bounding_box is not None else None
 
     def build_networks(self):
         self.model = GaussianSplatModel(
@@ -178,6 +168,7 @@ class GaussianSplatTrainer(ImplicitReconTrainer):
             device=self.device,
         )
 
+        self.mask = None
         if self.config.geometry.get("mask", False):
             self.mask = AppearanceEmbedding(
                 len(self.train_dataset.cameras)).to(self.device)
@@ -239,7 +230,7 @@ class GaussianSplatTrainer(ImplicitReconTrainer):
         ]
 
         self.mask_optimizer = None
-        if 'mask' in self.config.geometry and self.config.geometry.mask:
+        if self.mask is not None:
             self.mask_optimizer = torch.optim.Adam(
                 self.mask.parameters(), lr=lr_config.mask)
 
@@ -344,7 +335,7 @@ class GaussianSplatTrainer(ImplicitReconTrainer):
             return
 
         # Pick a random camera.
-        if (self.iteration - 1) % len(self.train_cameras) == 0:
+        if (self.iteration - 1) % len(self.train_cameras) == 0 or self.image_reader is None:
             random.shuffle(self.train_cameras)
             image_list = [camera.image_path for camera in self.train_cameras]
 
@@ -380,7 +371,9 @@ class GaussianSplatTrainer(ImplicitReconTrainer):
             pipeline_config=self.config.pipeline,
             bkgd_color=self.color_bkgd,
             anti_aliasing=self.config.texture.anti_aliasing,
-            separate_sh=True,
+            # TODO(chenyu): set to `separate_sh=True` once the `CUDA error` issue is
+            # fixed in distributed mode.
+            separate_sh=False, # True,
             use_trained_exposure=self.config.appearance.use_trained_exposure,
             depth_threshold=self.config.geometry.depth_threshold,
             device=self.device,
@@ -553,8 +546,6 @@ class GaussianSplatTrainer(ImplicitReconTrainer):
         self.state_dicts["meta_data"]["denom"] = self.gaussians.denom
         self.state_dicts["meta_data"]["spatial_lr_scale"] = self.spatial_lr_scale
 
-        if self.config.dataset.multi_blocks:
-            self.state_dicts["meta_data"]["block_id"] = self.train_dataset.current_block
         self.state_dicts["meta_data"]["camera_poses"] = self.train_dataset.camtoworlds
 
     def load_checkpoint(

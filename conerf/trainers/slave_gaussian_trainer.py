@@ -24,10 +24,10 @@ class SlaveGaussianSplatTrainer(GaussianSplatTrainer):
         trainset=None,
         valset=None,
         model: ModelBase = None,
+        appear_embedding: torch.nn.Module = None,
         block_id: int = None,
         device_id: int = 0,
     ) -> None:
-        # self.gaussians = None
 
         if trainset is None and block_id is not None:
             mx = config.dataset.get("mx", None)  # pylint: disable=C0103
@@ -41,13 +41,24 @@ class SlaveGaussianSplatTrainer(GaussianSplatTrainer):
                 cameras=[], camtoworlds=None, block_id=block_id)
             trainset.read(path=block_dir, block_id=block_id, device='cpu')
 
-        # if valset is None:
-        #     valset = load_val_dataset(config, 'cpu')
-
-        # self.admm_enabled = False
-
         super().__init__(config, prefetch_dataset,
-                         trainset, valset, model, block_id, device_id)
+                         trainset, valset, model, appear_embedding, block_id, device_id)
+
+    def clean(self):
+        self.gaussians = None
+        self.model = None
+        self.mask = None
+        self.ckpt_manager = None
+        self.train_dataset = None
+        self.val_dataset = None
+        self.optimizer = None
+        self.xyz_scheduler = None
+        self.mask_optimizer = None
+        if self.mask is not None:
+            self.mask_optimizer = None
+        self.evaluator = None
+
+        torch.cuda.empty_cache()
 
     def update_iteration(self, iteration: int):
         self.iteration = iteration
@@ -58,6 +69,10 @@ class SlaveGaussianSplatTrainer(GaussianSplatTrainer):
             self.gaussians.get_all_properties()
 
         return xyz, features_dc, features_rest, scaling, quaternion, opacity
+
+    @torch.no_grad()
+    def send_local_mask(self):
+        return self.mask
 
     @torch.no_grad()
     def send_local_loss(self):
@@ -190,3 +205,59 @@ class SlaveGaussianSplatTrainer(GaussianSplatTrainer):
         for i in range(interval):  # pylint: disable=W0612
             self.increment_iteration()
             self.train_iteration(data_batch=data_batch)
+
+    def compose_state_dicts(self) -> None:
+        super().compose_state_dicts()
+
+        if self.config.dataset.multi_blocks:
+            self.state_dicts["meta_data"]["block_id"] = self.train_dataset.current_block
+            self.state_dicts["meta_data"]["admm_enabled"] = self.admm_enabled
+
+            if self.admm_enabled:
+                # dual variables
+                self.state_dicts["meta_data"]["u_xyz"] = self.u_xyz
+                self.state_dicts["meta_data"]["u_fdc"] = self.u_fdc
+                self.state_dicts["meta_data"]["u_fr"] = self.u_fr
+                self.state_dicts["meta_data"]["u_s"] = self.u_s
+                self.state_dicts["meta_data"]["u_q"] = self.u_q
+                self.state_dicts["meta_data"]["u_o"] = self.u_o
+
+                # penalty parameters
+                self.state_dicts["meta_data"]["rho_xyz"] = self.rho_xyz
+                self.state_dicts["meta_data"]["rho_fdc"] = self.rho_fdc
+                self.state_dicts["meta_data"]["rho_fr"] = self.rho_fr
+                self.state_dicts["meta_data"]["rho_s"] = self.rho_s
+                self.state_dicts["meta_data"]["rho_q"] = self.rho_q
+                self.state_dicts["meta_data"]["rho_o"] = self.rho_o
+
+    def load_checkpoint(
+        self,
+        load_model=True,     # pylint: disable=W0613
+        load_optimizer=True,  # pylint: disable=W0613
+        load_scheduler=True,  # pylint: disable=W0613
+        load_meta_data=False  # pylint: disable=W0613
+    ) -> int:
+        iter_start = super().load_checkpoint(
+            False, load_optimizer, False, load_meta_data=True
+        )
+
+        if self.config.dataset.multi_blocks:
+            self.admm_enabled = self.state_dicts["meta_data"]["admm_enabled"]
+            if self.admm_enabled:
+                # dual variables
+                self.u_xyz = self.state_dicts["meta_data"]["u_xyz"]
+                self.u_fdc = self.state_dicts["meta_data"]["u_fdc"]
+                self.u_fr = self.state_dicts["meta_data"]["u_fr"]
+                self.u_s = self.state_dicts["meta_data"]["u_s"]
+                self.u_q = self.state_dicts["meta_data"]["u_q"]
+                self.u_o = self.state_dicts["meta_data"]["u_o"]
+
+                # penalty parameters
+                self.rho_xyz = self.state_dicts["meta_data"]["rho_xyz"]
+                self.rho_fdc = self.state_dicts["meta_data"]["rho_fdc"]
+                self.rho_fr = self.state_dicts["meta_data"]["rho_fr"]
+                self.rho_s = self.state_dicts["meta_data"]["rho_s"]
+                self.rho_q = self.state_dicts["meta_data"]["rho_q"]
+                self.rho_o = self.state_dicts["meta_data"]["rho_o"]
+
+        return iter_start

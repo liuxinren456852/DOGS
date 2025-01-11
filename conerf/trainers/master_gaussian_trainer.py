@@ -20,12 +20,11 @@ from torch.distributed.rpc import remote, rpc_async
 from conerf.datasets.dataset_base import MiniDataset
 from conerf.datasets.utils import (
     create_dataset, save_colmap_ply, compute_rainbow_color, get_block_info_dir,
-    points_in_bbox2D, swap_points3d_yz, compute_bounding_box2D
+    points_in_bbox2D, compute_bounding_box2D
 )
 from conerf.model.gaussian_fields.gaussian_splat_model import GaussianSplatModel
 from conerf.model.gaussian_fields.prune import calculate_v_imp_score, prune_list
 from conerf.trainers.implicit_recon_trainer import ImplicitReconTrainer
-# from conerf.trainers.gaussian_trainer import GaussianSplatTrainer
 from conerf.trainers.slave_gaussian_trainer import SlaveGaussianSplatTrainer
 from conerf.utils.config import config_parser, load_config
 from conerf.utils.utils import setup_seed
@@ -53,12 +52,10 @@ def fuse_block_gaussians(
     print('Fusing 3D Gaussians...')
     for block_id, model in block_gaussians.items():
         if point_bboxes is not None:
-            point_bbox = swap_points3d_yz(
-                point_bboxes[block_id].reshape(2, 3).numpy())
+            point_bbox = point_bboxes[block_id].reshape(2, 3).numpy()
             print(
                 f'[BLOCK#{block_id}] Before removing points: {model.get_xyz.shape[0]}')
-            # NOTE: the y-z coordinates are swapped.
-            points = swap_points3d_yz(model.get_xyz.cpu().numpy())
+            points = model.get_xyz.cpu().numpy()
             obb_points2d = trimesh.transform_points(
                 points[:, :2], world_to_obb_transform)
 
@@ -132,15 +129,13 @@ def select_gaussians_in_each_block(
     world_to_obb_transform: np.ndarray = None,
 ):
     points = gaussians.get_xyz.detach().cpu()
-    t_points = swap_points3d_yz(points.numpy())
     global_indices = []
-    print(f'num gaussians: {points.shape[0]}')
 
     # Regroup points inside in the same bounding box into the same block.
     for block_id, bbox in enumerate(bboxes):
-        t_bbox = swap_points3d_yz(bbox.reshape(2, 3).numpy())
+        bbox = bbox.reshape(2, 3).numpy()
         point_indices = points_in_bbox2D(
-            t_points[:, :2], t_bbox, world_to_obb_transform)
+            points.numpy()[:, :2], bbox, world_to_obb_transform)
         global_indices.append(torch.from_numpy(point_indices))
 
     # Count the frequency of each gaussian point and remove gaussians that
@@ -153,15 +148,13 @@ def select_gaussians_in_each_block(
     gaussians.extract_sub_gaussians(valid_gaussian_indices)
 
     points = gaussians.get_xyz.detach().cpu()
-    t_points = swap_points3d_yz(points.numpy())
     local_gaussians, global_indices = [], []
-    print(f'num gaussians: {points.shape[0]}')
 
     # Regroup points inside in the same bounding box into the same block.
     for block_id, bbox in enumerate(bboxes):
-        t_bbox = swap_points3d_yz(bbox.reshape(2, 3).numpy())
+        bbox = bbox.reshape(2, 3).numpy()
         point_indices = points_in_bbox2D(
-            t_points[:, :2], t_bbox, world_to_obb_transform)
+            points.numpy()[:, :2], bbox, world_to_obb_transform)
         global_indices.append(torch.from_numpy(point_indices))
         print(f'num gaussians in block#{block_id}: {point_indices.shape}')
         sub_gaussians = gaussians.get_sub_gaussians(point_indices)
@@ -256,7 +249,7 @@ class MasterGaussianSplatTrainer(ImplicitReconTrainer):
         print(
             f'[MasterGaussianSplatTrainer] world_to_obb_transform: {self.world_to_obb_transform}')
 
-    def init_block_trainers(self, sub_gaussians: List = None):
+    def init_block_trainers(self, sub_gaussians: List = None, sub_masks: Dict = None):
         assert sub_gaussians is None or len(sub_gaussians) == self.num_blocks
         self.remote_workers = {}
 
@@ -267,6 +260,7 @@ class MasterGaussianSplatTrainer(ImplicitReconTrainer):
 
             val_dataset = None
             model = None if sub_gaussians is None else sub_gaussians[block_id]
+            mask = None if sub_masks is None else sub_masks[block_id]
 
             # worker_name = WORKER_NAME.format(block_id + 1)
             worker_name = f"worker{block_id+1}"
@@ -275,7 +269,7 @@ class MasterGaussianSplatTrainer(ImplicitReconTrainer):
                 worker_name,
                 SlaveGaussianSplatTrainer,
                 args=(local_config, False, None, val_dataset,
-                      model, block_id, device_id)
+                      model, mask, block_id, device_id)
             )
 
     def setup_training_params(self):
@@ -307,6 +301,15 @@ class MasterGaussianSplatTrainer(ImplicitReconTrainer):
         self.state_dicts["meta_data"]["xyz_gradient_accum"] = self.gaussians.xyz_gradient_accum
         self.state_dicts["meta_data"]["denom"] = self.gaussians.denom
         self.state_dicts["meta_data"]["spatial_lr_scale"] = 0
+
+        if self.iteration >= self.config.geometry.densify_end_iter and \
+           self.config.trainer.admm.enable:
+            self.state_dicts["meta_data"]["rho_xyz"] = self.rho_xyz
+            self.state_dicts["meta_data"]["rho_fdc"] = self.rho_fdc
+            self.state_dicts["meta_data"]["rho_fr"] = self.rho_fr
+            self.state_dicts["meta_data"]["rho_s"] = self.rho_s
+            self.state_dicts["meta_data"]["rho_q"] = self.rho_q
+            self.state_dicts["meta_data"]["rho_o"] = self.rho_o
 
     def load_val_dataset(self):
         val_config = copy.deepcopy(self.config)
@@ -483,6 +486,16 @@ class MasterGaussianSplatTrainer(ImplicitReconTrainer):
 
         return block_gaussians
 
+    def collect_block_masks(self) -> Dict:
+        block_masks, futures = {}, {}
+        for block_id, worker in self.remote_workers.items():
+            futures[block_id] = worker.rpc_async().send_local_mask()
+
+        for block_id, future in futures.items():
+            block_masks[block_id] = future.wait()
+
+        return block_masks
+
     def collect_block_losses(self):
         futures = {}
         for block_id, worker in self.remote_workers.items():
@@ -506,6 +519,7 @@ class MasterGaussianSplatTrainer(ImplicitReconTrainer):
                 self.scalars_to_log[f"block{k}/quat_penalty"] = loss["train/quaternion_penalty"]
                 self.scalars_to_log[f"block{k}/opacity_penalty"] = loss["train/opacity_penalty"]
 
+    @torch.no_grad()
     def broadcast_global_gaussian_splat(self):
         futures = []
         for block_id, worker in self.remote_workers.items():
@@ -522,7 +536,6 @@ class MasterGaussianSplatTrainer(ImplicitReconTrainer):
 
     @torch.no_grad()
     def gaussian_splat_consensus(self):
-        # Set all properties of global 3D GS to zeros.
         self.prev_xyz = self.gaussians.get_xyz
         self.prev_features_dc = self.gaussians.get_features_dc
         self.prev_features_rest = self.gaussians.get_features_rest
@@ -530,6 +543,7 @@ class MasterGaussianSplatTrainer(ImplicitReconTrainer):
         self.prev_quaternion = self.gaussians.get_raw_quaternion
         self.prev_opacity = self.gaussians.get_raw_opacity
 
+        # Set all properties of global 3D GS to zeros.
         self.gaussians.reinitialize()
 
         self.block_gaussians = self.collect_block_gaussians()
@@ -543,7 +557,8 @@ class MasterGaussianSplatTrainer(ImplicitReconTrainer):
     @torch.no_grad()
     def fuse_local_gaussians(self):
         block_gaussians = self.collect_block_gaussians()
-        # xyz, features_dc, features_rest, scaling, quaternion, opacity, densify_point_bboxes = \
+        block_masks = self.collect_block_masks()
+
         xyz, features_dc, features_rest, scaling, quaternion, opacity, _ = \
             fuse_block_gaussians(
                 block_gaussians,
@@ -551,15 +566,14 @@ class MasterGaussianSplatTrainer(ImplicitReconTrainer):
                 self.world_to_obb_transform,
                 self.evaluator.output_dir
             )
-        print(f'[BEFORE PRUNING] xyz shape: {xyz.shape}')
         self.gaussians.init_from_external_properties(
             xyz, features_dc, features_rest, scaling, quaternion, opacity, optimizable=False
         )
+        num_gaussians = self.gaussians.get_xyz.shape[0]
+        print(f'[fuse_local_gaussians] num gaussians: {xyz.shape}')
 
-        data_dir = os.path.join(
-            self.config.dataset.root_dir, self.config.dataset.scene)
+        data_dir = os.path.join(self.config.dataset.root_dir, self.config.dataset.scene)
         camera_blocks = []
-        camera_pose_blocks = []
         for block_id in range(self.num_blocks):
             block_dir = get_block_info_dir(
                 data_dir,
@@ -568,16 +582,11 @@ class MasterGaussianSplatTrainer(ImplicitReconTrainer):
                 self.config.dataset.get("my", None),
             )
             block_dir = os.path.join(block_dir, f'block_{block_id}')
-            dataset = MiniDataset(
-                cameras=[], camtoworlds=None, block_id=block_id)
-            dataset.read(path=block_dir, read_image=False,
-                         block_id=block_id, device='cpu')
+            dataset = MiniDataset(cameras=[], camtoworlds=None, block_id=block_id)
+            dataset.read(path=block_dir, read_image=False, block_id=block_id, device='cpu')
             camera_blocks.append(dataset.cameras)
-            camera_pose_blocks.append(dataset.camtoworlds)
 
-        num_total_images = prune_gaussians_after_merge(  # pylint: disable=W0612
-            self.config, self.gaussians, camera_blocks, self.device
-        )
+        prune_gaussians_after_merge(self.config, self.gaussians, camera_blocks, self.device)
         num_gaussians = self.gaussians.get_xyz.shape[0]
         print(f'[AFTER PRUNING] xyz shape: {self.gaussians.get_xyz.shape}')
 
@@ -586,14 +595,18 @@ class MasterGaussianSplatTrainer(ImplicitReconTrainer):
         if not self.config.trainer.admm.enable:
             return
 
-        # TODO(chenyu): Replace `self.exp_point_bboxes` using `densify_point_bboxes`.
         self.visibility_count, self.global_indices, local_gaussians = \
             select_gaussians_in_each_block(
                 self.exp_point_bboxes, self.gaussians,
                 self.device, self.evaluator.output_dir, self.world_to_obb_transform
             )
 
-        self.init_block_trainers(sub_gaussians=local_gaussians)
+        # Empty remote worker resources.
+        for worker in self.remote_workers.values():
+            worker.rpc_async().clean().wait()
+
+        self.init_block_trainers(
+            sub_gaussians=local_gaussians, sub_masks=block_masks)
         self.setup_penalty_parameters(num_gaussians=num_gaussians)
         self.set_block_penalty_parameters()
 
@@ -602,10 +615,11 @@ class MasterGaussianSplatTrainer(ImplicitReconTrainer):
             worker.rpc_async().setup_dual_variables().wait()
             worker.rpc_async().enable_admm_training().wait()
 
+        torch.cuda.empty_cache()
+
     def train(self):
         desc = f"Training {self.config.expname}"
-        pbar = tqdm.trange(self.config.trainer.max_iterations,
-                           desc=desc, leave=False)
+        pbar = tqdm.trange(self.config.trainer.max_iterations, desc=desc)
 
         iter_start = self.load_checkpoint(
             load_optimizer=not self.config.trainer.no_load_opt,
@@ -643,6 +657,7 @@ class MasterGaussianSplatTrainer(ImplicitReconTrainer):
         if self.config.trainer.n_checkpoint % self.config.trainer.n_validation != 0 and \
            self.config.trainer.n_validation % self.config.trainer.n_checkpoint != 0:
             score = self.validate()
+            self.compose_state_dicts()
             self.save_checkpoint(score=score)
 
         self.train_done = True
@@ -731,25 +746,49 @@ class MasterGaussianSplatTrainer(ImplicitReconTrainer):
         super().log_info()
 
     def save_checkpoint(self, score: float = 0.0):
-        # futures = []
-        # for worker in self.remote_workers.values():
-        #     futures.append(rpc_async(
-        #         worker.owner(),
-        #         worker.rpc_sync().save_checkpoint,
-        #         args=(0,)
-        #     ))
+        # futures = {}
+        # for block_id, worker in self.remote_workers.items():
+        #     futures[block_id] = worker.rpc_async().save_checkpoint(0)
 
         super().save_checkpoint(score=score)
 
-        # for future in futures:
+        # for _, future in futures.items():
         #     future.wait()
+
+    def load_checkpoint(
+        self,
+        load_model=True,     # pylint: disable=W0613
+        load_optimizer=True,  # pylint: disable=W0613
+        load_scheduler=True,  # pylint: disable=W0613
+        load_meta_data=False  # pylint: disable=W0613
+    ) -> int:
+        iter_start = super().load_checkpoint(
+            False, load_optimizer, False, load_meta_data=True
+        )
+
+        meta_data = self.state_dicts["meta_data"]
+        self.gaussians.init_from_external_properties(
+            meta_data["xyz"], meta_data["features_dc"], meta_data["features_rest"],
+            meta_data["scaling"], meta_data["quaternion"], meta_data["opacity"],
+        )
+
+        # penalty parameters
+        if iter_start >= self.config.geometry.densify_end_iter and \
+           self.config.trainer.admm.enable:
+            self.rho_xyz = self.state_dicts["meta_data"]["rho_xyz"]
+            self.rho_fdc = self.state_dicts["meta_data"]["rho_fdc"]
+            self.rho_fr = self.state_dicts["meta_data"]["rho_fr"]
+            self.rho_s = self.state_dicts["meta_data"]["rho_s"]
+            self.rho_q = self.state_dicts["meta_data"]["rho_q"]
+            self.rho_o = self.state_dicts["meta_data"]["rho_o"]
+
+        return iter_start
 
 
 def run(config: OmegaConf):
     """ Distributed function to be implemented later. """
-
-    # Defines the ID of a worker in the world (all nodes combined)
-    rank = int(os.environ['RANK'])
+    rank = int(
+        os.environ['RANK'])  # Defines the ID of a worker in the world (all nodes combined)
     # The rank of the worker group (0 - max_nnodes)
     group_rank = int(os.environ["GROUP_RANK"])
     # Defines the ID of a worker within a node.

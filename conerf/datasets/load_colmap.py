@@ -146,6 +146,7 @@ def cluster_points_in_grid(
     num_blocks: int = 1,
     mx: int = 1,
     my: int = 1,
+    use_prior_center: bool = False,
     transform_world_to_obb: np.ndarray = None,
 ):
     _, bboxes, exp_bboxes, transform_world_to_obb = Grid2DClustering(
@@ -154,6 +155,7 @@ def cluster_points_in_grid(
         scale_factor=bbox_scale_factor[:2],
         p0=0.00001, p1=0.99999,
         mx=mx, my=my,
+        use_prior_center=use_prior_center,
         transform_world_to_obb=transform_world_to_obb,
     )
 
@@ -274,17 +276,20 @@ def load_colmap(
         # We use COLMAP's `model_orientation_aligner` to align the model axis such that
         # the y-axis points towards downward. Therefore, we transform the coordinate axis
         # to let the z-axis points towards the ground plane.
-        T = torch.tensor([
-            [1, 0, 0, 0],
-            [0, 0, 1, 0],
-            [0, -1, 0, 0],
-            [0, 0, 0, 1]
-        ], dtype=torch.float32)
-        camtoworlds = np.einsum("nij, ki -> nkj", camtoworlds, T)
-        points3d = (T[:3, :3] @ points3d.T).T  # [Np, 3]
+        # NOTE: for the `building` scene, the z-axis point towards the ground using COLMAP's
+        # aligner. Therefore, we do not make such coordiante transformation for it.
+        if subject_id.lower() != "building":
+            T = np.array([
+                [1, 0, 0, 0],
+                [0, 0, 1, 0],
+                [0, -1, 0, 0],
+                [0, 0, 0, 1]
+            ], dtype=np.float32)
+            camtoworlds = np.einsum("nij, ki -> nkj", camtoworlds, T)
+            points3d = (T[:3, :3] @ points3d.T).T  # [Np, 3]
 
         bbox_path = os.path.join(colmap_dir, "bounding_box.txt")
-        bounding_box = compute_bounding_box3D(points3d)
+        bounding_box = compute_bounding_box3D(torch.from_numpy(points3d))
         save_bounding_boxes([bounding_box], bbox_path)
     if scale:
         # normalize the scene
@@ -408,9 +413,15 @@ def load_colmap(
         camtoworlds, block_save_dir, all_indices, bbox_scale_factor,
         image_index_to_image_id, num_blocks, mx, my,
     )
+    
+    use_prior_center = False
+    if subject_id.lower() == "sci-art" or subject_id.lower() == "artsquad" or \
+       subject_id.lower() == "building":
+        use_prior_center = True
+
     point_bboxes, exp_point_bboxes, _ = cluster_points_in_grid(
         points3d, colors, block_save_dir, bbox_scale_factor,
-        num_blocks, mx, my, image_world_to_obb,
+        num_blocks, mx, my, use_prior_center, image_world_to_obb,
     )
     save_bounding_boxes(exp_camera_bboxes.tolist() +
                         exp_point_bboxes.tolist(), bboxes_path, 'w')
