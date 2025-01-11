@@ -81,6 +81,7 @@ def Grid2DXY(
     p1 = 0.98,
     mx: int = 1,
     my: int = 1,
+    use_prior_center: bool = False,
     transform_world_to_obb: np.ndarray = None,
 ):
     if transform_world_to_obb is None:
@@ -92,6 +93,20 @@ def Grid2DXY(
     aabb = compute_bounding_box2D(
         torch.from_numpy(obb_points2d), [1.0, 1.0], bbox_min_height, bbox_max_height, p0, p1)
     A, B = aabb[0, :], aabb[1, :]
+
+    grid_cells = []
+
+    if use_prior_center and mx * my == 4:
+        center_min = np.array([0, 0, bbox_min_height])
+        center_max = np.array([0, 0, bbox_max_height])
+        grid_cells.append(np.stack([A, center_max], axis=0))              # cell1
+        grid_cells.append(np.stack([[A[0], 0, bbox_min_height],
+                                    [0, B[1], bbox_max_height]], axis=0)) # cell2
+        grid_cells.append(np.stack([[0, A[1], bbox_min_height],
+                                    [B[0], 0, bbox_max_height]], axis=0)) # cell3
+        grid_cells.append(np.stack([center_min, B], axis=0))              # cell4
+
+        return grid_cells, transform_world_to_obb
 
     # (1) Split scene along x-axis.
     x_divisions = np.linspace(A[0], B[0], mx + 1)
@@ -135,6 +150,7 @@ def Grid2DClustering(
     num_blocks: int = 1, # pylint: disable=W0613
     mx: int = 1,
     my: int = 1,
+    use_prior_center: np.ndarray = None,
     transform_world_to_obb: np.ndarray = None,
 ) -> np.array:
     # points should be axis aligned such that its z-axis is aligned to real-world's gravity.
@@ -146,7 +162,8 @@ def Grid2DClustering(
         # points2d, bbox_min_height, bbox_max_height, p0, p1, num_blocks)
     # else:
     grid_cells, transform_obb_to_world = Grid2DXY(
-        points2d, bbox_min_height, bbox_max_height, p0, p1, mx, my, transform_world_to_obb,
+        points2d, bbox_min_height, bbox_max_height,
+        p0, p1, mx, my, use_prior_center, transform_world_to_obb,
     )
 
     # Group points into each grid cell.
@@ -163,9 +180,9 @@ def Grid2DClustering(
     for k, cell_box in enumerate(grid_cells):
         ratio_points = float(avg_block_points) / float(num_block_points[k])
         exp_scale_factor = scale_factor
-        # Smaller blocks should be expanded more aggressively.
-        if ratio_points >= 1.2:
-            exp_scale_factor = [1.2 * factor for factor in scale_factor]
+        # # Smaller blocks should be expanded more aggressively.
+        # if ratio_points >= 1.2:
+        #     exp_scale_factor = [1.2 * factor for factor in scale_factor]
         print(f'aggressive expanding bounding box with scale factor: {exp_scale_factor}')
 
         exp_cell_box = expand_bounding_box(
