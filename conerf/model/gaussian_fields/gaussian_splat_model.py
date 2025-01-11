@@ -314,12 +314,12 @@ class GaussianSplatModel:
         self._opacity = self._opacity[indices]
 
     def reinitialize(self):
-        self._xyz.zero_()
-        self._features_dc.zero_()
-        self._features_rest.zero_()
-        self._scaling.zero_()
-        self._quaternion.zero_()
-        self._opacity.zero_()
+        self._xyz = torch.zeros_like(self._xyz)
+        self._features_dc = torch.zeros_like(self._features_dc)
+        self._features_rest = torch.zeros_like(self._features_rest)
+        self._scaling = torch.zeros_like(self._scaling)
+        self._quaternion = torch.zeros_like(self._quaternion)
+        self._opacity = torch.zeros_like(self._opacity)
 
     @torch.no_grad()
     def plus_gaussians(self, gaussians, indices: torch.Tensor):
