@@ -27,7 +27,10 @@ Our method accelerates the training of 3DGS by 6+ times when evaluated on large-
 ## 🚀 TODO & Roadmap
 
 - ✔️ Release evaluation code 🎉
-- 🔲 Release pre-trained models on `Mill19`, `UrbanScene3D`, and `MatrixCity`
+- ✔️ Release pre-trained models
+    - Download our pre-trained models and evaluated results from [hugging face](https://huggingface.co/AIBluefihser/dogs_model/tree/main).
+    Note that there is a checkpoint issue with the rubble scene as it did not use the updated model parameters when saving the checkpoint. But
+    we provided the rendered images and metrics under the `eval` folder for each scene for reference, feel free to use these images in your experiment comparison.
 - ✔️ Release web-viewer
 - ✔️ Release training code
     - ✔️ Gaussian Splatting trainer 🎉
@@ -35,7 +38,8 @@ Our method accelerates the training of 3DGS by 6+ times when evaluated on large-
         - ✔️ Gaussian Pruning of [LightGaussian](https://github.com/VITA-Group/LightGaussian)
     - ✔️ [Scaffold-GS](https://city-super.github.io/scaffold-gs/) trainer 🎉
     - ✔️ Support [Taming-3DGS](https://github.com/humansensinglab/taming-3dgs) 🎉
-    - 🔲 ADMM Gaussian Splatting trainer
+    - ✔️ ADMM Gaussian Splatting trainer
+        - We refactor the main training logic for code readability and more efficient distributed training, which could result in potentially minor performance drop in rendered image quality but wouldn't differ too much to our original version.
 - 🔲 Test on street-view scenes
 - 🔲 Support distributed training of `Scaffold-GS` and `Octree-GS`
 
@@ -108,6 +112,9 @@ DATASET=mipnerf360
 We provide configuration files for training the `blender`, `llff`, `matrix_city`, `mipnerf360`, `tanks_and_temples` and `urban3d` datasets. We can also train our own dataset by setting the correct dataset path and scenes in `config/gaussian_splatting/custom.yaml`.
 
 #### Train 3DGS on multiple GPUs
+
+We are still brewing the distributed training code due to refactoring and testing. You can try the `admm` branch for a quick test: `git checkout admm`. Note since the code and CUDA rasterizer for training 3DGS are different to the code when finishing the experiments in the camera ready, it is suggested to evaluate the performance once the our pretrained models are released.
+
 Here we provide scripts and an example to show how to run DOGS on three compute nodes with 9 GPUs in total (1 GPU on a master node and 4 GPUs each of two slave nodes).
 
 Before running the program, we may need to modify the parameters in the provided scripts:
