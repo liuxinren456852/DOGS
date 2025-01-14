@@ -41,12 +41,12 @@ trainer:
   local_rank: 0
   admm:
     enable: true
-    consensus_interval: 100
-    alpha_xyz: 1e4
+    consensus_interval: 200
+    alpha_xyz: 1e5
     alpha_fdc: 1e4
-    alpha_fr: 1e3
+    alpha_fr: 1e5
     alpha_s: 1e4
-    alpha_q: 1e4
+    alpha_q: 1e5
     alpha_o: 1e4
     stop_adapt_iter: 32000
     mu: 10
@@ -107,5 +107,5 @@ pipeline:
 
 loss:
   lambda_dssim: 0.2
-  lambda_scale: 0
+  lambda_scale: 0.05
   lambda_mask: 0.5

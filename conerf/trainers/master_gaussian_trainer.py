@@ -557,7 +557,7 @@ class MasterGaussianSplatTrainer(ImplicitReconTrainer):
     @torch.no_grad()
     def fuse_local_gaussians(self):
         block_gaussians = self.collect_block_gaussians()
-        block_masks = self.collect_block_masks()
+        block_masks = None # self.collect_block_masks()
 
         xyz, features_dc, features_rest, scaling, quaternion, opacity, _ = \
             fuse_block_gaussians(
@@ -692,39 +692,40 @@ class MasterGaussianSplatTrainer(ImplicitReconTrainer):
             self.fuse_local_gaussians()
             self.validate()
 
-        if self.iteration % self.config.trainer.admm.consensus_interval == 0:
-            # (2) Global gaussian splats consensus by averaging all local gaussian splats.
-            self.gaussian_splat_consensus()
+        # if self.iteration % self.config.trainer.admm.consensus_interval == 0:
 
-            # (3) Broadcast the global gaussian splats to all local trainers.
-            self.broadcast_global_gaussian_splat()
+        # (2) Global gaussian splats consensus by averaging all local gaussian splats.
+        self.gaussian_splat_consensus()
 
-            # (4) Update the dual variables in all local trainers.
-            self.update_block_dual_variables()
+        # (3) Broadcast the global gaussian splats to all local trainers.
+        self.broadcast_global_gaussian_splat()
 
-            # (5) Compute the primal residuals and dual residuals.
-            primal_res_dict = self.compute_primal_residual()
-            dual_res_dict = self.compute_dual_residual()
+        # (4) Update the dual variables in all local trainers.
+        self.update_block_dual_variables()
 
-            # (6) Self-adaptation of penalty parameters and update the penalty
-            # parameters in each block.
-            if self.iteration <= self.config.trainer.admm.stop_adapt_iter:
-                self.adapt_penalty_parameters(
-                    primal_res_dict=primal_res_dict,
-                    dual_res_dict=dual_res_dict
-                )
-                self.set_block_penalty_parameters()
+        # (5) Compute the primal residuals and dual residuals.
+        primal_res_dict = self.compute_primal_residual()
+        dual_res_dict = self.compute_dual_residual()
 
-            self.scalars_to_log["penalty/rho_xyz"] = self.rho_xyz
-            self.scalars_to_log["penalty/rho_fdc"] = self.rho_fdc
-            self.scalars_to_log["penalty/rho_fr"] = self.rho_fr
-            self.scalars_to_log["penalty/rho_s"] = self.rho_s
-            self.scalars_to_log["penalty/rho_q"] = self.rho_q
-            self.scalars_to_log["penalty/rho_o"] = self.rho_o
-            self.scalars_to_log["train/primal_residual"] = \
-                sum(primal_res_dict.values()).detach().item()
-            self.scalars_to_log["train/dual_residual"] = \
-                sum(dual_res_dict.values()).detach().item()
+        # (6) Self-adaptation of penalty parameters and update the penalty
+        # parameters in each block.
+        if self.iteration <= self.config.trainer.admm.stop_adapt_iter:
+            self.adapt_penalty_parameters(
+                primal_res_dict=primal_res_dict,
+                dual_res_dict=dual_res_dict
+            )
+            self.set_block_penalty_parameters()
+
+        self.scalars_to_log["penalty/rho_xyz"] = self.rho_xyz
+        self.scalars_to_log["penalty/rho_fdc"] = self.rho_fdc
+        self.scalars_to_log["penalty/rho_fr"] = self.rho_fr
+        self.scalars_to_log["penalty/rho_s"] = self.rho_s
+        self.scalars_to_log["penalty/rho_q"] = self.rho_q
+        self.scalars_to_log["penalty/rho_o"] = self.rho_o
+        self.scalars_to_log["train/primal_residual"] = \
+            sum(primal_res_dict.values()).detach().item()
+        self.scalars_to_log["train/dual_residual"] = \
+            sum(dual_res_dict.values()).detach().item()
 
     def validate(self) -> float:
         futures = []
@@ -798,7 +799,7 @@ def run(config: OmegaConf):
     local_world_size = int(os.environ['LOCAL_WORLD_SIZE'])
 
     options = rpc.TensorPipeRpcBackendOptions(
-        num_worker_threads=64, rpc_timeout=300)
+        num_worker_threads=64, rpc_timeout=800)
     print(f'rank: {rank}; local_rank: {local_rank}, group_rank: {group_rank} ' +
           f'world size: {world_size}, local_world_size: {local_world_size}')
 

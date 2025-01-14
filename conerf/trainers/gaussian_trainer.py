@@ -355,7 +355,7 @@ class GaussianSplatTrainer(ImplicitReconTrainer):
         camera.image = copy.deepcopy(image)
         resolution = self.training_resolution()
         camera_origin = camera.copy_to_device(self.device) \
-            if self.config.geometry.get("mask", False) else None
+            if self.mask is not None else None
         camera = camera.downsample(resolution).copy_to_device(self.device)
         self.scalars_to_log['train/resolution'] = resolution
 
@@ -391,7 +391,7 @@ class GaussianSplatTrainer(ImplicitReconTrainer):
         pixels = camera.image.permute(2, 0, 1)  # [RGB, height, width]
         # loss_ssim = ssim(pixels, colors)
         loss_ssim = fused_ssim(colors.unsqueeze(0), pixels.unsqueeze(0))
-        if self.config.geometry.get("mask", False):
+        if self.mask is not None:
             image_size = camera.image.shape[:-1]
             camera = camera_origin.downsample(32).copy_to_device(self.device)
             mask = self.mask(camera.image.permute(2, 0, 1),
