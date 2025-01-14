@@ -5,8 +5,7 @@ import torch
 
 from omegaconf import OmegaConf
 
-# from diff_gaussian_rasterization import (
-from old_diff_gaussian_rasterization import (
+from diff_gaussian_rasterization import (
     GaussianRasterizationSettings,
     GaussianRasterizer
 )
@@ -59,9 +58,8 @@ def render(
         campos=viewpoint_camera.camera_center,
         prefiltered=False,
         debug=pipeline_config.debug,
-        # antialiasing=anti_aliasing,
+        antialiasing=anti_aliasing,
         depth_threshold=depth_threshold,
-        f_count=False,
     )
 
     rasterizer = GaussianRasterizer(raster_settings=raster_settings)
@@ -126,8 +124,7 @@ def render(
             cov3D_precomp=cov3D_precomp,
         )
     else:
-        rendered_image, radii, depth, alpha, pixels = rasterizer(
-        # rendered_image, radii, depth = rasterizer(
+        rendered_image, radii, depth = rasterizer(
             means3D=means3D,
             means2D=means2D,
             shs=spherical_harmonics,

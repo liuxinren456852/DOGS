@@ -371,9 +371,7 @@ class GaussianSplatTrainer(ImplicitReconTrainer):
             pipeline_config=self.config.pipeline,
             bkgd_color=self.color_bkgd,
             anti_aliasing=self.config.texture.anti_aliasing,
-            # TODO(chenyu): set to `separate_sh=True` once the `CUDA error` issue is
-            # fixed in distributed mode.
-            separate_sh=False, # True,
+            separate_sh=True,
             use_trained_exposure=self.config.appearance.use_trained_exposure,
             depth_threshold=self.config.geometry.depth_threshold,
             device=self.device,

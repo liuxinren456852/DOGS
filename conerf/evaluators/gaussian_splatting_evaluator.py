@@ -273,9 +273,7 @@ class GaussianSplatEvaluator(Evaluator):
             pipeline_config=self.config.pipeline,
             bkgd_color=self.color_bkgd,
             anti_aliasing=self.config.texture.anti_aliasing,
-            # TODO(chenyu): set to `separate_sh=True` once the `CUDA error` issue is
-            # fixed in distributed mode.
-            separate_sh=False, # True,
+            separate_sh=True,
         )
 
         render_time = time.time() - time_start
