@@ -277,7 +277,7 @@ def load_colmap(
         # the y-axis points towards downward. Therefore, we transform the coordinate axis
         # to let the z-axis points towards the ground plane.
         # NOTE: for the `building` scene, the z-axis point towards the ground using COLMAP's
-        # aligner. Therefore, we do not make such coordiante transformation for it.
+        # aligner. Therefore, we do not make such coordinate transformation for it.
         if subject_id.lower() != "building":
             T = np.array([
                 [1, 0, 0, 0],
