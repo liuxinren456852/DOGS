@@ -16,9 +16,9 @@ pip install tqdm scikit-image opencv-python configargparse lpips imageio-ffmpeg 
 pip install -U scikit-learn
 # pip install torch-geometric==2.4.0
 
-# conda install conda-forge::opencv
+conda install conda-forge::opencv
 conda install pytorch3d -c pytorch3d
-# conda install pytorch-scatter -c pyg
+conda install pytorch-scatter -c pyg
 conda remove ffmpeg --force
 
 # Third-parties.
