@@ -194,6 +194,8 @@ class GaussianSplatEvaluator(Evaluator):
                 model.save_colmap_ply(colmap_ply_path)
 
             image_dir = os.path.join(val_dir, "images")
+            if iteration is not None:
+                image_dir = os.path.join(image_dir, f'iter_{iteration}')
             os.makedirs(image_dir, exist_ok=True)
 
             cameras = dataset.cameras
